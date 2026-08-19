@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Models
+models/*.joblib
+models/*.pkl
+models/*.onnx
+
+# Data
+data/
+*.csv
+*.parquet
+
+# Generated files
+model_comparison_results.csv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
