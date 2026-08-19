@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/PC/Desktop/Machine_Learning/Flight_Delay_Prediction/mlruns/963480256893625329/34189878bd224a9f8a6d0ed491c0eba8/artifacts
+end_time: 1787140221217
+entry_point_name: ''
+experiment_id: '963480256893625329'
+lifecycle_stage: active
+run_id: 34189878bd224a9f8a6d0ed491c0eba8
+run_name: lightgbm
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1787140025159
+status: 3
+tags: []
+user_id: PC

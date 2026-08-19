@@ -1,0 +1,23 @@
+artifact_path: file:///C:/Users/PC/Desktop/Machine_Learning/Flight_Delay_Prediction/mlruns/963480256893625329/models/m-c3c54b1ace9747c39dedd3cf01b1602c/artifacts
+flavors:
+  lightgbm:
+    code: null
+    data: model.pkl
+    lgb_version: 4.6.0
+    model_class: lightgbm.sklearn.LGBMRegressor
+    serialization_format: cloudpickle
+    skops_trusted_types: null
+  python_function:
+    data: model.pkl
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.lightgbm
+    python_version: 3.11.9
+mlflow_version: 3.10.1
+model_id: m-c3c54b1ace9747c39dedd3cf01b1602c
+model_size_bytes: 3167353
+model_uuid: m-c3c54b1ace9747c39dedd3cf01b1602c
+prompts: null
+run_id: 6e405148ab344370972dafc5f2086d01
+utc_time_created: '2026-08-18 23:21:39.923055'

@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/PC/Desktop/Machine_Learning/Flight_Delay_Prediction/mlruns/475674793396666683/5cc22ae7fceb42d2a3a04d2b1b03ee91/artifacts
+end_time: 1787087097100
+entry_point_name: ''
+experiment_id: '475674793396666683'
+lifecycle_stage: active
+run_id: 5cc22ae7fceb42d2a3a04d2b1b03ee91
+run_name: xgboost
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1787087054730
+status: 3
+tags: []
+user_id: PC

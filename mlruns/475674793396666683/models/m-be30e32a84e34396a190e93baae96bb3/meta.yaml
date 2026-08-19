@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/PC/Desktop/Machine_Learning/Flight_Delay_Prediction/mlruns/475674793396666683/models/m-be30e32a84e34396a190e93baae96bb3/artifacts
+creation_timestamp: 1787086083256
+experiment_id: '475674793396666683'
+last_updated_timestamp: 1787086086788
+model_id: m-be30e32a84e34396a190e93baae96bb3
+model_type: null
+name: model
+source_run_id: d15f16054a184820bb6d1a08c6057802
+status: 2
+status_message: null

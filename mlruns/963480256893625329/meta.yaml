@@ -1,0 +1,7 @@
+artifact_location: file:///C:/Users/PC/Desktop/Machine_Learning/Flight_Delay_Prediction/mlruns/963480256893625329
+creation_time: 1787094523307
+experiment_id: '963480256893625329'
+last_update_time: 1787094523307
+lifecycle_stage: active
+name: flight_arr_delay_prediction_v2
+workspace: default
