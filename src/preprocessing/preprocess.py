@@ -1,46 +1,38 @@
+from sklearn.model_selection import train_test_split
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import train_test_split
 
 from config.config import Config
-
+from src.preprocessing.target_encoder import TargetEncoder
 
 def build_preprocessor():
     """
-    Build the baseline preprocessing pipeline.
+    Build preprocessing for LightGBM native categorical features.
 
     Numerical:
         Median imputation
-        ↓
-        StandardScaler
 
     Categorical:
-        Most-frequent imputation
-        ↓
-        OneHotEncoder
+        Passed through unchanged.
+        They will be converted to Pandas 'category'
+        before training LightGBM.
 
     IMPORTANT:
-        TargetEncoder is NOT used here.
-
-        Target Encoding is tested separately because
-        it requires the target variable and OOF encoding.
+        No OneHotEncoder is used.
+        LightGBM handles categorical features natively.
     """
 
     # ========================================================
     # FEATURES
     # ========================================================
 
-    numerical_features = (
-        Config.PREPROCESSING.NUMERICAL_FEATURES
-    )
+    numerical_features = Config.PREPROCESSING.NUMERICAL_FEATURES
+    categorical_features = Config.PREPROCESSING.CATEGORICAL_FEATURES
 
-    categorical_features = (
-        Config.PREPROCESSING.CATEGORICAL_FEATURES
-    )
     # ========================================================
     # NUMERICAL PIPELINE
     # ========================================================
@@ -57,91 +49,114 @@ def build_preprocessor():
     )
 
     # ========================================================
-    # CATEGORICAL PIPELINE
-    # ========================================================
-
-    categorical_pipeline = Pipeline(
-        steps=[
-  
-            (
-                "encoder",
-                OneHotEncoder(
-                    handle_unknown="ignore",
-                    sparse_output=True
-                )
-            )
-        ]
-    )
-
-    # ========================================================
     # COLUMN TRANSFORMER
     # ========================================================
 
-    transformers = [
-        (
-            "numerical",
-            numerical_pipeline,
-            numerical_features
-        ),
-        (
-            "categorical",
-            categorical_pipeline,
-            categorical_features
-        )
-    ]
-
     preprocessor = ColumnTransformer(
-        transformers=transformers,
+        transformers=[
+            (
+                "numerical",
+                numerical_pipeline,
+                numerical_features
+            ),
+            (
+                "target_encoding",
+                TargetEncoder(
+                    columns=categorical_features,
+                    random_state=Config.MODEL.RANDOM_STATE,
+                ),
+                categorical_features,
+            ),
+        ],
         remainder="drop"
     )
 
     return preprocessor
 
 
+
 def preprocess_data(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
-    y_train=None
 ):
     """
-    Fit preprocessing only on training data
-    and transform both train and test data.
+    Preprocessing for LightGBM native categorical features.
 
-    This function is for the baseline One-Hot
-    preprocessing.
+    Numerical:
+        Median imputation
 
-    Target Encoding is NOT performed here.
+    Categorical:
+        Convert to pandas category dtype.
+
+    IMPORTANT:
+        No OneHotEncoder.
+        No ColumnTransformer.
+
+        LightGBM receives categorical columns directly.
     """
 
-    preprocessor = build_preprocessor()
+    X_train = X_train.copy()
+    X_test = X_test.copy()
+
+    numerical_features = (
+        Config.PREPROCESSING.NUMERICAL_FEATURES
+    )
+
+    categorical_features = (
+        Config.PREPROCESSING.CATEGORICAL_FEATURES
+    )
 
     # ========================================================
-    # FIT ON TRAINING DATA ONLY
+    # NUMERICAL FEATURES
     # ========================================================
 
-    X_train_processed = (
-        preprocessor.fit_transform(
-            X_train
+    numerical_imputer = SimpleImputer(
+        strategy="median"
+    )
+
+    X_train[numerical_features] = (
+        numerical_imputer.fit_transform(
+            X_train[numerical_features]
+        )
+    )
+
+    X_test[numerical_features] = (
+        numerical_imputer.transform(
+            X_test[numerical_features]
         )
     )
 
     # ========================================================
-    # TRANSFORM TEST DATA
+    # CATEGORICAL FEATURES
     # ========================================================
 
-    X_test_processed = (
-        preprocessor.transform(
-            X_test
+    for col in categorical_features:
+
+        # Combine train + test categories so both datasets
+        # use the same category definition.
+        categories = pd.concat(
+            [
+                X_train[col],
+                X_test[col]
+            ]
+        ).astype("category").cat.categories
+
+        X_train[col] = pd.Categorical(
+            X_train[col],
+            categories=categories
         )
-    )
+
+        X_test[col] = pd.Categorical(
+            X_test[col],
+            categories=categories
+        )
 
     return (
-        X_train_processed,
-        X_test_processed,
-        preprocessor
+        X_train,
+        X_test,
+        numerical_imputer,
     )
 
-from sklearn.model_selection import train_test_split
 
 def split_data(df):
 
@@ -150,6 +165,15 @@ def split_data(df):
     df = df.dropna(
         subset=[target]
     ).copy()
+
+    if "FL_DATE" not in df.columns:
+        raise ValueError("FL_DATE is required for chronological splitting.")
+
+    df["FL_DATE"] = pd.to_datetime(df["FL_DATE"], errors="coerce")
+    if df["FL_DATE"].isna().any():
+        raise ValueError("FL_DATE contains values that cannot be parsed as dates.")
+
+    df = df.sort_values("FL_DATE").reset_index(drop=True)
 
     X = df.drop(
         columns=[
@@ -160,12 +184,14 @@ def split_data(df):
 
     y = df[target]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42
-    )
+    split_index = int(len(df) * (1 - Config.MODEL.TEST_SIZE))
+    if split_index <= 0 or split_index >= len(df):
+        raise ValueError("The dataset is too small for the configured test split.")
+
+    X_train = X.iloc[:split_index].copy()
+    X_test = X.iloc[split_index:].copy()
+    y_train = y.iloc[:split_index].copy()
+    y_test = y.iloc[split_index:].copy()
 
     print("\nTrain shape:", X_train.shape)
     print("Test shape :", X_test.shape)
@@ -176,6 +202,9 @@ def split_data(df):
         y_train,
         y_test
     )
+
+
+
 if __name__ == "__main__":
 
     from src.data.load import load_data

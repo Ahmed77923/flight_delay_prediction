@@ -12,7 +12,7 @@ Flight_Delay_Prediction/
 
 This project trains regression models to predict a flight's arrival delay in minutes. The target is `ARR_DELAY`, using flight schedule, route, carrier, distance, and calendar/time features from monthly flight records.
 
-The current training workflow compares four LightGBM regressors, records each run in a local MLflow tracking store, and saves the comparison table to `model_comparison_results.csv`.
+The current training workflow trains a LightGBM regressor, records the run in a local MLflow tracking store, and saves the evaluation table to `model_comparison_results.csv`.
 
 ## Project Status
 
@@ -29,12 +29,12 @@ The repository currently contains the data preparation, feature engineering, mod
 5. Create date, day-of-week, week, weekend, departure-time, and arrival-time features.
 6. Split the data with `train_test_split(test_size=0.2, random_state=42)`.
 7. Fit preprocessing on the training data only.
-8. Train four LightGBM configurations.
+8. Train the configured LightGBM model.
 9. Evaluate each model with RMSE, MAE, and R2.
 10. Log parameters, metrics, and model artifacts to MLflow.
 11. Select the model with the lowest test RMSE and write the comparison table.
 
-The split is currently random, despite the historical comments referring to a chronological split. Use a chronological split before treating the reported test metrics as a future-period estimate.
+The trainer uses a chronological split: earlier dates are used for training and the latest dates are held out for testing.
 
 ## Repository Layout
 
@@ -121,12 +121,20 @@ Run the trainer from the repository root so its relative paths and local MLflow 
 python -m src.models.train
 ```
 
+To run a faster experiment on one million cleaned rows:
+
+```powershell
+python -m src.models.train --sample-size 1000000
+```
+
+The sample uses a fixed random seed for reproducibility. Omitting `--sample-size` trains on all cleaned rows.
+
 The script prints dataset shapes, validation results, training progress, and metrics for each model. It creates or updates:
 
 - `model_comparison_results.csv`: models sorted by ascending test RMSE.
 - `mlruns/`: local MLflow experiments, metrics, parameters, and model artifacts.
 
-The four model configurations vary `num_leaves` across 7, 15, 31, and 63. They use a learning rate of `0.05` and `1,000` estimators, with the remaining parameters defined in `get_models()` in `src/models/train.py`.
+The configured model uses native LightGBM categorical features and the parameters defined in `get_models()` in `src/models/train.py`.
 
 ## MLflow
 
@@ -152,12 +160,11 @@ Run this from the repository root. Before using the script, verify that its `EXP
 
 ## Preprocessing and Features
 
-The baseline preprocessor in `src/preprocessing/preprocess.py` uses:
+The standalone preprocessor in `src/preprocessing/preprocess.py` uses:
 
 - Median imputation for numerical features.
-- One-hot encoding for `OP_UNIQUE_CARRIER`, `ORIGIN`, and `DEST`.
-- `handle_unknown="ignore"` so unseen categorical values do not fail transformation.
-- Sparse output for the encoded feature matrix.
+- Target encoding for the configured categorical columns.
+- Native pandas categorical dtypes in the trainer’s LightGBM path.
 
 The configured numerical features are:
 

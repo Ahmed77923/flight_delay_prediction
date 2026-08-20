@@ -1,10 +1,11 @@
 import numpy as np
 import pandas as pd
 
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import KFold
 
 
-class TargetEncoder:
+class TargetEncoder(BaseEstimator, TransformerMixin):
     """
     Leakage-safe Target Encoder.
 
@@ -181,6 +182,14 @@ class TargetEncoder:
             )
 
         return encoded
+
+    def get_feature_names_out(self, input_features=None):
+        """Return the encoded column names for sklearn transformers."""
+
+        if input_features is None:
+            input_features = self.columns
+
+        return np.asarray(input_features, dtype=object)
 
     def fit_transform_oof(self, X, y):
         """

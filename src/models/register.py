@@ -6,7 +6,7 @@ from mlflow.tracking import MlflowClient
 # CONFIG
 # ============================================================
 
-EXPERIMENT_NAME = "flight_arr_delay_prediction"
+EXPERIMENT_NAME = "flight_arr_delay_prediction_categorical_features"
 
 REGISTERED_MODEL_NAME = (
     "flight_arr_delay_best_model"

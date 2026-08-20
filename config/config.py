@@ -24,31 +24,80 @@ class ModelConfig:
 
 
 class PreprocessingConfig:
-    """Configuration for preprocessing."""
-
+    """
+    Configuration for preprocessing.
+    """
     CATEGORICAL_FEATURES = [
         "OP_UNIQUE_CARRIER",
         "ORIGIN",
         "DEST",
+        "route",
+        "departure_period",
+        "carrier_origin",
+        # "carrier_departure_period"
     ]
 
     NUMERICAL_FEATURES = [
         "CRS_ELAPSED_TIME",
         "DISTANCE",
+
         "year",
         "month",
-        "quarter",
         "day",
         "day_of_week",
         "week_of_year",
         "is_weekend",
+
         "departure_hour",
         "departure_minute",
+        
+        "departure_hour_sin",
+        "departure_hour_cos",
+        
+        "day_of_week_sin",
+        "day_of_week_cos",
+        
+        "month_sin",
+        "month_cos",
+
         "arrival_hour",
         "arrival_minute",
+
+        "distance_log",
+        "is_peak_departure",
+        # "scheduled_arrival",
+        # "scheduled_departure",
+        
+        "carrier_historical_delay",
+        "route_historical_delay",
+        
+        "origin_historical_delay",
+        
+        "origin_recent_delay_7",
+        "origin_recent_delay_30",
+           
+        "carrier_recent_delay_7",
+        "carrier_recent_delay_30",
+        
+        "route_recent_delay_7",
+        "route_recent_delay_30",
+        
+        "carrier_origin_historical_delay",
+        "aircraft_previous_delay"    
+    
     ]
+        
+# numerical__departure_time_minutes,0
+# numerical__departure_hour,0
 
-
+# numerical__departure_minute,0
+# numerical__arrival_hour,0
+# numerical__arrival_minute,0
+# numerical__is_peak_departure,0
+# numerical__arrival_time_minutes,0
+# numerical__quarter
+# numerical__distance_log
+    
 class MLflowConfig:
     """Configuration related to MLflow."""
 
