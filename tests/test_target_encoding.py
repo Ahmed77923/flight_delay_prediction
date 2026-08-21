@@ -1,14 +1,21 @@
 import pandas as pd
+from sklearn.preprocessing import OneHotEncoder
 
 from src.preprocessing.preprocess import build_preprocessor
 from src.preprocessing.target_encoder import TargetEncoder
 
 
-def test_build_preprocessor_includes_target_encoding() -> None:
+def test_build_preprocessor_includes_onehot_encoding() -> None:
     preprocessor = build_preprocessor()
     names = [name for name, _, _ in preprocessor.transformers]
 
-    assert "target_encoding" in names
+    assert "onehot" in names
+    onehot = dict(
+        (name, transformer)
+        for name, transformer, _ in preprocessor.transformers
+    )["onehot"]
+    assert isinstance(onehot, OneHotEncoder)
+    assert onehot.handle_unknown == "ignore"
 
 
 def test_target_encoder_oof_is_not_full_data_fit() -> None:

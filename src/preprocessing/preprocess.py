@@ -5,27 +5,20 @@ import pandas as pd
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import SimpleImputer
 
 from config.config import Config
-from src.preprocessing.target_encoder import TargetEncoder
 
 def build_preprocessor() -> ColumnTransformer:
     """
-    Build preprocessing for LightGBM native categorical features.
+    Build the preprocessing transformer.
 
     Numerical:
         Median imputation
 
     Categorical:
-        Passed through unchanged.
-        They will be converted to Pandas 'category'
-        before training LightGBM.
-
-    IMPORTANT:
-        No OneHotEncoder is used.
-        LightGBM handles categorical features natively.
+        One-hot encoding with unknown categories ignored.
     """
 
     # ========================================================
@@ -62,15 +55,13 @@ def build_preprocessor() -> ColumnTransformer:
                 numerical_features
             ),
             (
-                "target_encoding",
-                TargetEncoder(
-                    columns=categorical_features,
-                    random_state=Config.MODEL.RANDOM_STATE,
-                ),
+                "onehot",
+                OneHotEncoder(handle_unknown="ignore"),
                 categorical_features,
             ),
         ],
-        remainder="drop"
+        remainder="drop",
+        sparse_threshold=1.0,
     )
 
     return preprocessor
@@ -160,7 +151,7 @@ def preprocess_data(
     )
 
 
-def split_data(
+def split_data( 
     df: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
 

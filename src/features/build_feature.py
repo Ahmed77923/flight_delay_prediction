@@ -483,12 +483,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         inplace=True
     )
 
-    # Restore chronological order
-    df = (
-        df.sort_values("scheduled_departure")
-        .reset_index(drop=True)
-    ) 
-    # TAIL_NUM is only used to build aircraft historical features
+    # TAIL_NUM is only used to build aircraft historical features.
+    # split_data() restores chronological order before the train/test split,
+    # so avoid copying the full frame here.
     df.drop(
     columns=[
         "TAIL_NUM",

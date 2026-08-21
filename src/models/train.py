@@ -21,8 +21,8 @@ from src.data.load import load_data
 from src.data.clean_data import clean_data
 from src.features.build_feature import build_features
 from src.preprocessing.preprocess import (
+    build_preprocessor,
     split_data,
-    preprocess_data,
 )
 
 
@@ -38,7 +38,7 @@ RANDOM_STATE: int = 42
 DATA_PATH: str = "data/"
 
 EXPERIMENT_NAME: str = (
-    "flight_arr_delay_prediction_categorical_features"
+    "flight_arr_delay_prediction_categorical_features_V2"
 )
 
 TRACKING_URI: str = "file:./mlruns"
@@ -108,7 +108,6 @@ def get_feature_importance(
 # ============================================================
 # LOAD + PREPROCESS DATA
 # ============================================================
-
 def prepare_data(
     sample_size: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Any]:
@@ -233,14 +232,9 @@ def prepare_data(
     print("STEP 5: PREPROCESSING")
     print("=" * 70)
 
-    (
-        X_train_processed,
-        X_test_processed,
-        preprocessor,
-    ) = preprocess_data(
-        X_train,
-        X_test,
-    )
+    preprocessor = build_preprocessor()
+    X_train_processed = preprocessor.fit_transform(X_train)
+    X_test_processed = preprocessor.transform(X_test)
 
     print(
         "\nProcessed train shape:",
@@ -623,11 +617,11 @@ def log_parameters(
 def train_model(
     model_name: str,
     model_config: Dict[str, Any],
-    X_train: pd.DataFrame,
+    X_train: Any,
     y_train: pd.Series,
-    X_test: pd.DataFrame,
+    X_test: Any,
     y_test: pd.Series,
-    # numerical_imputer,
+    feature_names: Any,
 ) -> Dict[str, Any]:
 
     model = model_config["model"]
@@ -651,7 +645,7 @@ def train_model(
                 "target": TARGET,
                 "train_period": "2025",
                 "test_period": "2026-01_to_2026-06",
-                "categorical_strategy": "native_lightgbm",
+                "categorical_strategy": "onehot",
             }
         )
 
@@ -666,53 +660,6 @@ def train_model(
         )
 
         # ====================================================
-        # CATEGORICAL FEATURES
-        # ====================================================
-
-        categorical_features = (
-            X_train
-            .select_dtypes(
-                include=["category"]
-            )
-            .columns
-            .tolist()
-        )
-
-        # Keep only columns that actually exist
-        categorical_features = [
-            col
-            for col in categorical_features
-            if col in X_train.columns
-        ]
-
-        print("\nNative categorical features:")
-
-        for col in categorical_features:
-            print(
-                f"  {col}: "
-                f"{X_train[col].dtype}"
-            )
-
-        # ====================================================
-        # CHECK CATEGORICAL DTYPES
-        # ====================================================
-
-        invalid_categorical = [
-            col
-            for col in categorical_features
-            if not pd.api.types.is_categorical_dtype(
-                X_train[col]
-            )
-        ]
-
-        if invalid_categorical:
-
-            raise TypeError(
-                "These categorical columns are not "
-                f"'category' dtype: {invalid_categorical}"
-            )
-
-        # ====================================================
         # TRAIN
         # ====================================================
 
@@ -723,7 +670,6 @@ def train_model(
         model.fit(
             X_train,
             y_train,
-            categorical_feature=categorical_features,
         )
 
         training_time = (
@@ -747,8 +693,6 @@ def train_model(
         print(
             "\nCalculating feature importance..."
         )
-
-        feature_names = X_train.columns.tolist()
 
         feature_importance = (
             model.feature_importances_
@@ -998,26 +942,20 @@ def run_training(
         X_test,
         y_train,
         y_test,
-        _preprocessor,
+        preprocessor,
     ) = prepare_data(
         sample_size=sample_size
     )
 
     # ========================================================
-    # 2. LIGHTGBM NATIVE CATEGORICAL PREPROCESSING
+    # 2. ONE-HOT PREPROCESSING
     # ========================================================
 
     print("\n" + "=" * 70)
-    print("LIGHTGBM NATIVE CATEGORICAL PREPROCESSING")
+    print("ONE-HOT PREPROCESSING")
     print("=" * 70)
 
-    (
-        X_train,
-        X_test,
-    ) = preprocessing_for_lightgbm(
-        X_train,
-        X_test,
-    )
+    feature_names = preprocessor.get_feature_names_out()
 
     # ========================================================
     # 3. VALIDATE DATA
@@ -1060,6 +998,7 @@ def run_training(
             y_train=y_train,
             X_test=X_test,
             y_test=y_test,
+            feature_names=feature_names,
         )
 
         results.append(result)
@@ -1100,38 +1039,13 @@ def run_training(
         )
     )
 
-    # ========================================================
-    # 7. BEST MODEL
-    # ========================================================
-
-    best = results_df.iloc[0]
-
-    print("\n" + "=" * 70)
-    print("BEST MODEL")
-    print("=" * 70)
-
-    print(
-        f"Model : {best['model_name']}"
-    )
-
-    print(
-        f"RMSE  : {best['test_rmse']:.4f}"
-    )
-
-    print(
-        f"MAE   : {best['test_mae']:.4f}"
-    )
-
-    print(
-        f"R²    : {best['test_r2']:.4f}"
-    )
 
     # ========================================================
     # 8. SAVE RESULTS
     # ========================================================
 
     results_path = (
-        "model_comparison_results.csv"
+        "model_comparison_results_one_Hot.csv"
     )
 
     results_df.to_csv(
@@ -1156,132 +1070,6 @@ def run_training(
     print("=" * 70)
 
     return results_df
-
-
-def preprocessing_for_lightgbm(
-    X_train: pd.DataFrame,
-    X_test: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Prepare data for LightGBM native categorical features.
-
-    - Convert categorical columns to pandas category
-    - Remove unsupported datetime/object columns
-    - Keep numerical features unchanged
-    """
-
-    X_train = X_train.copy()
-    X_test = X_test.copy()
-
-    categorical_features = [
-        "OP_UNIQUE_CARRIER",
-        "ORIGIN",
-        "DEST",
-        "route",
-        "departure_period",
-        "carrier_origin",
-    ]
-
-    numerical_features = [
-        "CRS_ELAPSED_TIME",
-        "DISTANCE",
-        "year",
-        "month",
-        "day",
-        "day_of_week",
-        "week_of_year",
-        "is_weekend",
-        "departure_hour",
-        "departure_minute",
-        "departure_hour_sin",
-        "departure_hour_cos",
-        "day_of_week_sin",
-        "day_of_week_cos",
-        "month_sin",
-        "month_cos",
-        "arrival_hour",
-        "arrival_minute",
-        "distance_log",
-        "is_peak_departure",
-        "carrier_historical_delay",
-        "route_historical_delay",
-        "origin_historical_delay",
-        "origin_recent_delay_7",
-        "origin_recent_delay_30",
-        "carrier_recent_delay_7",
-        "carrier_recent_delay_30",
-        "route_recent_delay_7",
-        "route_recent_delay_30",
-        "carrier_origin_historical_delay",
-    ]
-
-    # --------------------------------------------------------
-    # CATEGORICAL
-    # --------------------------------------------------------
-
-    for col in categorical_features:
-
-        if col in X_train.columns:
-
-            X_train[col] = (
-                X_train[col]
-                .astype("category")
-            )
-
-            # IMPORTANT:
-            # train/test must use the same categories
-            X_test[col] = (
-                X_test[col]
-                .astype(
-                    pd.CategoricalDtype(
-                        categories=X_train[col].cat.categories
-                    )
-                )
-            )
-
-    # --------------------------------------------------------
-    # REMOVE UNSUPPORTED COLUMNS
-    # --------------------------------------------------------
-
-    drop_columns = [
-        "scheduled_departure",
-        "scheduled_arrival",
-    ]
-
-    X_train = X_train.drop(
-        columns=[
-            col
-            for col in drop_columns
-            if col in X_train.columns
-        ]
-    )
-
-    X_test = X_test.drop(
-        columns=[
-            col
-            for col in drop_columns
-            if col in X_test.columns
-        ]
-    )
-
-    # --------------------------------------------------------
-    # CHECK OBJECT COLUMNS
-    # --------------------------------------------------------
-
-    object_columns = (
-        X_train
-        .select_dtypes(include=["object"])
-        .columns
-        .tolist()
-    )
-
-    if object_columns:
-
-        raise TypeError(
-            f"Object columns remain: {object_columns}"
-        )
-
-    return X_train, X_test
 
 # ============================================================
 # ENTRY POINT
