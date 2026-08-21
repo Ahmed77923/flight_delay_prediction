@@ -1,6 +1,7 @@
 import time
 import warnings
 import argparse
+from typing import Any, Dict, Optional, Tuple
 
 import mlflow
 import mlflow.lightgbm
@@ -32,17 +33,17 @@ warnings.filterwarnings("ignore")
 # CONFIGURATION
 # ============================================================
 
-RANDOM_STATE = 42
+RANDOM_STATE: int = 42
 
-DATA_PATH = "data/"
+DATA_PATH: str = "data/"
 
-EXPERIMENT_NAME = (
+EXPERIMENT_NAME: str = (
     "flight_arr_delay_prediction_categorical_features"
 )
 
-TRACKING_URI = "file:./mlruns"
+TRACKING_URI: str = "file:./mlruns"
 
-TARGET = "ARR_DELAY"
+TARGET: str = "ARR_DELAY"
 
 
 # ============================================================
@@ -58,7 +59,10 @@ mlflow.set_experiment(
 )
 
 
-def get_feature_importance(model, preprocessor):
+def get_feature_importance(
+    model: Any,
+    preprocessor: Any,
+) -> pd.DataFrame:
 
     feature_names = (
         preprocessor
@@ -105,7 +109,9 @@ def get_feature_importance(model, preprocessor):
 # LOAD + PREPROCESS DATA
 # ============================================================
 
-def prepare_data(sample_size=None):
+def prepare_data(
+    sample_size: Optional[int] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Any]:
 
     print("\n" + "=" * 70)
     print("STEP 1: LOAD DATA")
@@ -260,11 +266,11 @@ def prepare_data(sample_size=None):
 # ============================================================
 
 def validate_data(
-    X_train,
-    X_test,
-    y_train,
-    y_test,
-):
+    X_train: Any,
+    X_test: Any,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> None:
 
     print("\n" + "=" * 70)
     print("DATA VALIDATION")
@@ -501,7 +507,7 @@ def validate_data(
 # MODELS
 # ============================================================
 
-def get_models():
+def get_models() -> Dict[str, Dict[str, Any]]:
 
     models = {
 
@@ -546,9 +552,9 @@ def get_models():
 # ============================================================
 
 def calculate_metrics(
-    y_true,
-    predictions,
-):
+    y_true: Any,
+    predictions: Any,
+) -> Dict[str, float]:
 
     rmse = np.sqrt(
         mean_squared_error(
@@ -579,10 +585,10 @@ def calculate_metrics(
 # ============================================================
 
 def log_parameters(
-    model,
-    X_train,
-    X_test,
-):
+    model: Any,
+    X_train: Any,
+    X_test: Any,
+) -> None:
 
     mlflow.log_params(
         {
@@ -615,14 +621,14 @@ def log_parameters(
 # TRAIN ONE MODEL
 # ============================================================
 def train_model(
-    model_name,
-    model_config,
-    X_train,
-    y_train,
-    X_test,
-    y_test,
+    model_name: str,
+    model_config: Dict[str, Any],
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
     # numerical_imputer,
-):
+) -> Dict[str, Any]:
 
     model = model_config["model"]
     flavor = model_config["flavor"]
@@ -973,7 +979,9 @@ def train_model(
                 test_metrics["r2"],
         }
 
-def run_training(sample_size=None):
+def run_training(
+    sample_size: Optional[int] = None,
+) -> pd.DataFrame:
 
     print("\n" + "=" * 70)
     print("FLIGHT DELAY MODEL TRAINING")
@@ -1153,7 +1161,7 @@ def run_training(sample_size=None):
 def preprocessing_for_lightgbm(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
-):
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Prepare data for LightGBM native categorical features.
 

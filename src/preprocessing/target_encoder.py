@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
 import numpy as np
 import pandas as pd
 
@@ -33,11 +35,11 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
 
     def __init__(
         self,
-        columns,
-        smoothing=10.0,
-        n_splits=5,
-        random_state=42,
-    ):
+        columns: List[str],
+        smoothing: float = 10.0,
+        n_splits: int = 5,
+        random_state: int = 42,
+    ) -> None:
         self.columns = columns
         self.smoothing = smoothing
         self.n_splits = n_splits
@@ -46,7 +48,7 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
         self.global_mean_ = None
         self.mapping_ = {}
 
-    def _validate_input(self, X):
+    def _validate_input(self, X: pd.DataFrame) -> None:
         """Validate input DataFrame and required columns."""
 
         if not isinstance(X, pd.DataFrame):
@@ -63,7 +65,11 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
                 f"Missing columns: {missing_columns}"
             )
 
-    def _calculate_mapping(self, X, y):
+    def _calculate_mapping(
+        self,
+        X: pd.DataFrame,
+        y: Any,
+    ) -> Tuple[float, Dict[str, pd.Series]]:
         """
         Calculate smoothed target statistics.
 
@@ -120,7 +126,7 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
 
         return global_mean, mapping
 
-    def fit(self, X, y):
+    def fit(self, X: pd.DataFrame, y: Any) -> "TargetEncoder":
         """
         Fit encoder using all available training data.
 
@@ -150,7 +156,7 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
 
         return self
 
-    def transform(self, X):
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """
         Transform categorical columns using fitted statistics.
 
@@ -183,7 +189,10 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
 
         return encoded
 
-    def get_feature_names_out(self, input_features=None):
+    def get_feature_names_out(
+        self,
+        input_features: Optional[Sequence[str]] = None,
+    ) -> np.ndarray:
         """Return the encoded column names for sklearn transformers."""
 
         if input_features is None:
@@ -191,7 +200,11 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
 
         return np.asarray(input_features, dtype=object)
 
-    def fit_transform_oof(self, X, y):
+    def fit_transform_oof(
+        self,
+        X: pd.DataFrame,
+        y: Any,
+    ) -> pd.DataFrame:
         """
         Generate leakage-safe Out-of-Fold target encoding.
 

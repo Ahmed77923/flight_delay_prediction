@@ -1,3 +1,5 @@
+from typing import Tuple
+
 from sklearn.model_selection import train_test_split
 import pandas as pd
 
@@ -9,7 +11,7 @@ from sklearn.impute import SimpleImputer
 from config.config import Config
 from src.preprocessing.target_encoder import TargetEncoder
 
-def build_preprocessor():
+def build_preprocessor() -> ColumnTransformer:
     """
     Build preprocessing for LightGBM native categorical features.
 
@@ -78,7 +80,7 @@ def build_preprocessor():
 def preprocess_data(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
-):
+) -> Tuple[pd.DataFrame, pd.DataFrame, SimpleImputer]:
     """
     Preprocessing for LightGBM native categorical features.
 
@@ -158,7 +160,9 @@ def preprocess_data(
     )
 
 
-def split_data(df):
+def split_data(
+    df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
 
     target = Config.DATA.TARGET
 

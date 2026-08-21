@@ -1,3 +1,5 @@
+from typing import Any, List, Optional
+
 import mlflow
 from mlflow.tracking import MlflowClient
 
@@ -6,13 +8,13 @@ from mlflow.tracking import MlflowClient
 # CONFIG
 # ============================================================
 
-EXPERIMENT_NAME = "flight_arr_delay_prediction_categorical_features"
+EXPERIMENT_NAME: str = "flight_arr_delay_prediction_categorical_features"
 
-REGISTERED_MODEL_NAME = (
+REGISTERED_MODEL_NAME: str = (
     "flight_arr_delay_best_model"
 )
 
-METRIC = "test_rmse"
+METRIC: str = "test_rmse"
 
 
 # ============================================================
@@ -23,7 +25,7 @@ mlflow.set_tracking_uri(
     "file:./mlruns"
 )
 
-client = MlflowClient()
+client: MlflowClient = MlflowClient()
 
 
 # ============================================================
@@ -45,7 +47,7 @@ if experiment is None:
 # GET ALL MODEL RUNS
 # ============================================================
 
-runs = client.search_runs(
+runs: List[Any] = client.search_runs(
     experiment_ids=[experiment.experiment_id],
     filter_string=(
         "attributes.status = 'FINISHED'"
@@ -65,7 +67,7 @@ if not runs:
 # FIND BEST RUN
 # ============================================================
 
-best_run = None
+best_run: Any = None
 
 for run in runs:
 
@@ -90,28 +92,28 @@ if best_run is None:
 # BEST RUN INFORMATION
 # ============================================================
 
-run_id = best_run.info.run_id
+run_id: str = best_run.info.run_id
 
-model_name = (
+model_name: str = (
     best_run.data.tags.get(
         "model_type",
         "unknown"
     )
 )
 
-rmse = (
+rmse: float = (
     best_run.data.metrics[
         "test_rmse"
     ]
 )
 
-mae = (
+mae: Optional[float] = (
     best_run.data.metrics.get(
         "test_mae"
     )
 )
 
-r2 = (
+r2: Optional[float] = (
     best_run.data.metrics.get(
         "test_r2"
     )
@@ -149,7 +151,7 @@ if r2 is not None:
 # CHECK MODEL ARTIFACT
 # ============================================================
 
-model_uri = (
+model_uri: str = (
     f"runs:/{run_id}/model"
 )
 
@@ -166,7 +168,7 @@ print("\n" + "=" * 60)
 print("REGISTERING BEST MODEL")
 print("=" * 60)
 
-registered_model = mlflow.register_model(
+registered_model: Any = mlflow.register_model(
     model_uri=model_uri,
     name=REGISTERED_MODEL_NAME,
 )

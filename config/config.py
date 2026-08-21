@@ -1,24 +1,25 @@
 from pathlib import Path
+from typing import List, Type
 
 
 class DataConfig:
     """Configuration related to data."""
 
-    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
-    RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
-    PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
+    RAW_DATA_DIR: Path = PROJECT_ROOT / "data" / "raw"
+    PROCESSED_DATA_DIR: Path = PROJECT_ROOT / "data" / "processed"
 
-    TARGET = "ARR_DELAY"
+    TARGET: str = "ARR_DELAY"
 
 
 class ModelConfig:
     """Configuration related to machine learning models."""
 
-    TEST_SIZE = 0.2
-    RANDOM_STATE = 42
+    TEST_SIZE: float = 0.2
+    RANDOM_STATE: int = 42
 
-    MODEL_DIR = (
+    MODEL_DIR: Path = (
         DataConfig.PROJECT_ROOT / "models"
     )
 
@@ -27,7 +28,7 @@ class PreprocessingConfig:
     """
     Configuration for preprocessing.
     """
-    CATEGORICAL_FEATURES = [
+    CATEGORICAL_FEATURES: List[str] = [
         "OP_UNIQUE_CARRIER",
         "ORIGIN",
         "DEST",
@@ -37,7 +38,7 @@ class PreprocessingConfig:
         # "carrier_departure_period"
     ]
 
-    NUMERICAL_FEATURES = [
+    NUMERICAL_FEATURES: List[str] = [
         "CRS_ELAPSED_TIME",
         "DISTANCE",
 
@@ -101,16 +102,16 @@ class PreprocessingConfig:
 class MLflowConfig:
     """Configuration related to MLflow."""
 
-    EXPERIMENT_NAME = "flight-delay-regression"
+    EXPERIMENT_NAME: str = "flight-delay-regression"
 
-    TRACKING_URI = "mlruns"
+    TRACKING_URI: str = "mlruns"
 
 
 class APIConfig:
     """Configuration related to FastAPI."""
 
-    HOST = "0.0.0.0"
-    PORT = 8000
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
 
 
 class Config:
@@ -120,8 +121,8 @@ class Config:
     Combines all project configurations.
     """
 
-    DATA = DataConfig
-    MODEL = ModelConfig
-    PREPROCESSING = PreprocessingConfig
-    MLFLOW = MLflowConfig
-    API = APIConfig
+    DATA: Type[DataConfig] = DataConfig
+    MODEL: Type[ModelConfig] = ModelConfig
+    PREPROCESSING: Type[PreprocessingConfig] = PreprocessingConfig
+    MLFLOW: Type[MLflowConfig] = MLflowConfig
+    API: Type[APIConfig] = APIConfig

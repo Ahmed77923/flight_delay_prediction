@@ -4,14 +4,14 @@ from src.preprocessing.preprocess import build_preprocessor
 from src.preprocessing.target_encoder import TargetEncoder
 
 
-def test_build_preprocessor_includes_target_encoding():
+def test_build_preprocessor_includes_target_encoding() -> None:
     preprocessor = build_preprocessor()
     names = [name for name, _, _ in preprocessor.transformers]
 
     assert "target_encoding" in names
 
 
-def test_target_encoder_oof_is_not_full_data_fit():
+def test_target_encoder_oof_is_not_full_data_fit() -> None:
     X = pd.DataFrame({"cat": ["A", "A", "B", "B"]})
     y = pd.Series([1, 100, 2, 200])
 
