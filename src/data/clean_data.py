@@ -28,7 +28,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # Reset index
     df = df.reset_index(drop=True)
-    # Remove ARR_DELAY outliers using IQR
+    # IQR
     Q1 = df["ARR_DELAY"].quantile(0.25)
     Q3 = df["ARR_DELAY"].quantile(0.75)
 

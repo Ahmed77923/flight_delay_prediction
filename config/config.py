@@ -6,7 +6,7 @@ class DataConfig:
     """Configuration related to data."""
 
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
-
+    DATA_PATH : Path = PROJECT_ROOT / "data"
     RAW_DATA_DIR: Path = PROJECT_ROOT / "data" / "raw"
     PROCESSED_DATA_DIR: Path = PROJECT_ROOT / "data" / "processed"
 
@@ -88,23 +88,20 @@ class PreprocessingConfig:
     
     ]
         
-# numerical__departure_time_minutes,0
-# numerical__departure_hour,0
 
-# numerical__departure_minute,0
-# numerical__arrival_hour,0
-# numerical__arrival_minute,0
-# numerical__is_peak_departure,0
-# numerical__arrival_time_minutes,0
-# numerical__quarter
-# numerical__distance_log
-    
+
 class MLflowConfig:
     """Configuration related to MLflow."""
 
-    EXPERIMENT_NAME: str = "flight-delay-regression"
+    TRACKING_URI: str = "sqlite:///mlflow.db"
+    
+    DATA_PATH: str = "data/"
 
-    TRACKING_URI: str = "mlruns"
+    EXPERIMENT_NAME: str = (
+        "flight_arr_delay_prediction_categorical_features_V3"
+    )
+
+
 
 
 class APIConfig:

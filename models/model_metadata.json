@@ -1,0 +1,53 @@
+{
+    "model_name": "lightgbm",
+    "model_version": "1.0",
+    "training_samples": 8000,
+    "test_samples": 2000,
+    "number_of_features": 4942,
+    "categorical_features": [
+        "OP_UNIQUE_CARRIER",
+        "ORIGIN",
+        "DEST",
+        "route",
+        "departure_period",
+        "carrier_origin"
+    ],
+    "numerical_features": [
+        "CRS_ELAPSED_TIME",
+        "DISTANCE",
+        "year",
+        "month",
+        "day",
+        "day_of_week",
+        "week_of_year",
+        "is_weekend",
+        "departure_hour",
+        "departure_minute",
+        "departure_hour_sin",
+        "departure_hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "month_sin",
+        "month_cos",
+        "arrival_hour",
+        "arrival_minute",
+        "distance_log",
+        "is_peak_departure",
+        "carrier_historical_delay",
+        "route_historical_delay",
+        "origin_historical_delay",
+        "origin_recent_delay_7",
+        "origin_recent_delay_30",
+        "carrier_recent_delay_7",
+        "carrier_recent_delay_30",
+        "route_recent_delay_7",
+        "route_recent_delay_30",
+        "carrier_origin_historical_delay",
+        "aircraft_previous_delay"
+    ],
+    "metrics": {
+        "mae": 14.492673600338579,
+        "rmse": 18.598378554573628,
+        "r2": -0.06700848333355514
+    }
+}

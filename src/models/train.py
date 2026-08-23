@@ -1,10 +1,14 @@
 import time
 import warnings
 import argparse
+import json
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+import joblib
 import mlflow
 import mlflow.lightgbm
+import mlflow.sklearn
 
 import numpy as np
 import pandas as pd
@@ -16,14 +20,17 @@ from sklearn.metrics import (
 )
 
 from lightgbm import LGBMRegressor
+from sklearn.pipeline import Pipeline
 
+from config.config import Config
 from src.data.load import load_data
 from src.data.clean_data import clean_data
 from src.features.build_feature import build_features
 from src.preprocessing.preprocess import (
     build_preprocessor,
     split_data,
-)
+)  
+from mlflow.tracking import MlflowClient
 
 
 warnings.filterwarnings("ignore")
@@ -33,29 +40,21 @@ warnings.filterwarnings("ignore")
 # CONFIGURATION
 # ============================================================
 
-RANDOM_STATE: int = 42
 
-DATA_PATH: str = "data/"
 
-EXPERIMENT_NAME: str = (
-    "flight_arr_delay_prediction_categorical_features_V2"
-)
 
-TRACKING_URI: str = "file:./mlruns"
-
-TARGET: str = "ARR_DELAY"
 
 
 # ============================================================
 # MLFLOW SETUP
 # ============================================================
-
+# mlflow.set_tracking_uri("http://127.0.0.1:5000")1
 mlflow.set_tracking_uri(
-    TRACKING_URI
+    Config.MLFLOW.TRACKING_URI
 )
 
 mlflow.set_experiment(
-    EXPERIMENT_NAME
+    Config.MLFLOW.EXPERIMENT_NAME
 )
 
 
@@ -110,14 +109,22 @@ def get_feature_importance(
 # ============================================================
 def prepare_data(
     sample_size: Optional[int] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Any]:
+) -> Tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.Series,
+    pd.Series,
+    Any,
+]:
 
     print("\n" + "=" * 70)
     print("STEP 1: LOAD DATA")
     print("=" * 70)
 
     df = load_data(
-        DATA_PATH
+        Config.DATA.DATA_PATH
     )
 
     print(
@@ -147,7 +154,7 @@ def prepare_data(
         if sample_size < len(df):
             df = df.sample(
                 n=sample_size,
-                random_state=RANDOM_STATE,
+                random_state=Config.MODEL.RANDOM_STATE,
             ).reset_index(drop=True)
 
             print(
@@ -247,6 +254,8 @@ def prepare_data(
     )
 
     return (
+        X_train,
+        X_test,
         X_train_processed,
         X_test_processed,
         y_train,
@@ -529,7 +538,7 @@ def get_models() -> Dict[str, Dict[str, Any]]:
                 n_jobs=-1,
 
                 # Reproducibility
-                random_state=RANDOM_STATE,
+                random_state=Config.MODEL.RANDOM_STATE,
 
                 # Disable LightGBM logs
                 verbosity=-1,
@@ -586,11 +595,11 @@ def log_parameters(
 
     mlflow.log_params(
         {
-            "random_state": RANDOM_STATE,
+            "random_state": Config.MODEL.RANDOM_STATE,
             "train_rows": X_train.shape[0],
             "test_rows": X_test.shape[0],
             "num_features": X_train.shape[1],
-            "target": TARGET,
+            "target": Config.DATA.TARGET,
         }
     )
 
@@ -622,6 +631,9 @@ def train_model(
     X_test: Any,
     y_test: pd.Series,
     feature_names: Any,
+    preprocessor: Any,
+    X_train_raw: pd.DataFrame,
+    X_test_raw: pd.DataFrame,
 ) -> Dict[str, Any]:
 
     model = model_config["model"]
@@ -642,7 +654,7 @@ def train_model(
         mlflow.set_tags(
             {
                 "model": model_name,
-                "target": TARGET,
+                "target": Config.DATA.TARGET,
                 "train_period": "2025",
                 "test_period": "2026-01_to_2026-06",
                 "categorical_strategy": "onehot",
@@ -806,6 +818,101 @@ def train_model(
             )
         )
 
+        # Package the ALREADY-FITTED components for reproducible inference.
+        # Do not call final_pipeline.fit(): both steps were fitted above.
+        final_pipeline = Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("model", model),
+            ]
+        )
+
+        pipeline_predictions = final_pipeline.predict(X_test_raw)
+        if not np.allclose(
+            test_predictions,
+            pipeline_predictions,
+        ):
+            raise ValueError(
+                "Pipeline predictions differ from the existing workflow."
+            )
+
+        print(
+            "Prediction equivalence check: PASSED"
+        )
+
+        model_dir = Path("models")
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        model_path = model_dir / "flight_delay_model.joblib"
+        metadata_path = model_dir / "model_metadata.json"
+        feature_names_path = model_dir / "feature_names.json"
+
+        joblib.dump(final_pipeline, model_path)
+
+        feature_names_path.write_text(
+            json.dumps(list(feature_names), indent=4),
+            encoding="utf-8",
+        )
+
+        metadata = {
+            "model_name": model_name,
+            "model_version": "1.0",
+            "training_samples": int(len(y_train)),
+            "test_samples": int(len(y_test)),
+            "number_of_features": int(len(feature_names)),
+            "categorical_features": list(
+                Config.PREPROCESSING.CATEGORICAL_FEATURES
+            ),
+            "numerical_features": list(
+                Config.PREPROCESSING.NUMERICAL_FEATURES
+            ),
+            "metrics": {
+                "mae": float(test_metrics["mae"]),
+                "rmse": float(test_metrics["rmse"]),
+                "r2": float(test_metrics["r2"]),
+            },
+        }
+        metadata_path.write_text(
+            json.dumps(metadata, indent=4),
+            encoding="utf-8",
+        )
+
+        loaded_pipeline = joblib.load(model_path)
+        original_predictions = final_pipeline.predict(
+            X_test_raw.iloc[:10]
+        )
+        loaded_predictions = loaded_pipeline.predict(
+            X_test_raw.iloc[:10]
+        )
+
+        if not np.allclose(
+            original_predictions,
+            loaded_predictions,
+        ):
+            raise ValueError(
+                "Reloaded pipeline predictions do not match the original."
+            )
+
+        print(
+            "\n========================================\n"
+            "FINAL MODEL TRAINING\n"
+            "========================================\n"
+            f"\nModel: {model_name}"
+            f"\nTraining samples: {len(y_train):,}"
+            f"\nTest samples: {len(y_test):,}"
+            f"\nFinal feature count: {len(feature_names):,}"
+            f"\n\nMAE: {test_metrics['mae']:.4f}"
+            f"\nRMSE: {test_metrics['rmse']:.4f}"
+            f"\nR²: {test_metrics['r2']:.4f}"
+            "\n\n========================================\n"
+            "MODEL SAVED\n"
+            "========================================\n"
+            f"\nModel: {model_path}"
+            f"\nMetadata: {metadata_path}"
+            f"\nFeature names: {feature_names_path}"
+            "\n\nModel reload verification: PASSED"
+        )
+
         # ====================================================
         # LOG METRICS
         # ====================================================
@@ -836,10 +943,44 @@ def train_model(
         # LOG MODEL
         # ====================================================
 
-        flavor.log_model(
-            model,
-            name="model",
-        )
+        try:
+            mlflow.sklearn.log_model(
+                sk_model=final_pipeline,
+                name="flight_delay_pipeline",
+                serialization_format="pickle",
+            )
+            print(f"\nMLflow pipeline logged successfully in {run.info.run_id}")
+            active_run = mlflow.active_run()
+          
+            run_id = mlflow.active_run().info.run_id
+
+            client = MlflowClient()
+
+            artifacts = client.list_artifacts(run_id)
+
+            print("\n=== MLFLOW ARTIFACTS ===")
+
+            for artifact in artifacts:
+                print(
+                    artifact.path,
+                    artifact.is_dir,
+                    artifact.file_size,
+                )
+
+            print("\n=== RUN INFO ===")
+            run = client.get_run(run_id)
+
+            print("Run ID:", run.info.run_id)
+            print("Artifact URI:", run.info.artifact_uri)
+            print("Tracking URI:", mlflow.get_tracking_uri())
+            if active_run:
+                print("Run ID:", active_run.info.run_id)
+                print("Artifact URI:", active_run.info.artifact_uri)
+            print("MLflow Tracking URI:", mlflow.get_tracking_uri())
+        except (FileNotFoundError, OSError, mlflow.exceptions.MlflowException) as exc:
+            print(
+                f"\nMLflow pipeline logging skipped: {exc}"
+            )
 
         # ====================================================
         # RESULTS
@@ -938,6 +1079,8 @@ def run_training(
     print("\nPreparing data...")
 
     (
+        X_train_raw,
+        X_test_raw,
         X_train,
         X_test,
         y_train,
@@ -999,6 +1142,9 @@ def run_training(
             X_test=X_test,
             y_test=y_test,
             feature_names=feature_names,
+            preprocessor=preprocessor,
+            X_train_raw=X_train_raw,
+            X_test_raw=X_test_raw,
         )
 
         results.append(result)
@@ -1082,6 +1228,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--sample-size",
+        "--sample_size",
         type=int,
         default=None,
         help="Optional number of cleaned rows to use, for example 1000000.",

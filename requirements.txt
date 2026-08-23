@@ -1,0 +1,13 @@
+streamlit
+pandas
+numpy
+scikit-learn
+joblib
+lightgbm
+scipy
+mlflow
+pytest
+fastapi
+uvicorn
+python-dotenv
+httpx

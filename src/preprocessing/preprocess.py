@@ -67,7 +67,7 @@ def build_preprocessor() -> ColumnTransformer:
     return preprocessor
 
 
-
+# i shoud delete this function because it is not used in the code------------------------
 def preprocess_data(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
@@ -244,8 +244,8 @@ if __name__ == "__main__":
     ) = train_test_split(
         df.drop(columns=[Config.DATA.TARGET]),
         df[Config.DATA.TARGET],
-        test_size=0.2,
-        random_state=42
+        test_size=Config.MODEL.TEST_SIZE,
+        random_state=Config.MODEL.RANDOM_STATE
     )
     print("\nX_train shape:",X_train.shape)
 
@@ -266,14 +266,11 @@ if __name__ == "__main__":
     # PREPROCESSING
     # ========================================================
 
-    (
-        X_train_processed,
-        X_test_processed,
-        preprocessor
-    ) = preprocess_data(
-        X_train,
-        X_test
-    )
+    preprocessor = build_preprocessor()
+
+    X_train_processed = preprocessor.fit_transform(X_train)
+
+    X_test_processed = preprocessor.transform(X_test)
 
     print(
         "\nProcessed X_train shape:",

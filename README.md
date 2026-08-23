@@ -344,8 +344,8 @@ Feature names include the `ColumnTransformer` prefixes and one-hot category name
 The trainer uses a local file-backed MLflow store:
 
 ```text
-Tracking URI: file:./mlruns
-Experiment: flight_arr_delay_prediction_categorical_features_V2
+Tracking URI: sqlite:///mlflow.db
+Experiment: flight_arr_delay_prediction_categorical_features_V3
 ```
 
 Each training run logs:
