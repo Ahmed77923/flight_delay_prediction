@@ -6,9 +6,10 @@ class DataConfig:
     """Configuration related to data."""
 
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
-    DATA_PATH : Path = PROJECT_ROOT / "data"
-    RAW_DATA_DIR: Path = PROJECT_ROOT / "data" / "raw"
-    PROCESSED_DATA_DIR: Path = PROJECT_ROOT / "data" / "processed"
+
+    DATA_PATH: Path = PROJECT_ROOT / "data"
+    RAW_DATA_DIR: Path = DATA_PATH / "raw"
+    PROCESSED_DATA_DIR: Path = DATA_PATH / "processed"
 
     TARGET: str = "ARR_DELAY"
 
@@ -19,15 +20,27 @@ class ModelConfig:
     TEST_SIZE: float = 0.2
     RANDOM_STATE: int = 42
 
-    MODEL_DIR: Path = (
-        DataConfig.PROJECT_ROOT / "models"
+    MODEL_NAME: str = "flight-arr-delay"
+    MODEL_DIR: Path = DataConfig.PROJECT_ROOT / "models"
+
+
+class FeatureConfig:
+    """Configuration for feature engineering and online feature serving."""
+
+    FEATURE_STATE_DIR: Path = (
+        DataConfig.PROJECT_ROOT / "models" / "feature_state"
     )
+
+    FEATURE_STATE_FILE: Path = (
+        FEATURE_STATE_DIR / "feature_state.joblib"
+    )
+
+    RECENT_WINDOWS: tuple[int, ...] = (7, 30)
 
 
 class PreprocessingConfig:
-    """
-    Configuration for preprocessing.
-    """
+    """Configuration for model preprocessing."""
+
     CATEGORICAL_FEATURES: List[str] = [
         "OP_UNIQUE_CARRIER",
         "ORIGIN",
@@ -35,7 +48,6 @@ class PreprocessingConfig:
         "route",
         "departure_period",
         "carrier_origin",
-        # "carrier_departure_period"
     ]
 
     NUMERICAL_FEATURES: List[str] = [
@@ -51,57 +63,46 @@ class PreprocessingConfig:
 
         "departure_hour",
         "departure_minute",
-        
-        "departure_hour_sin",
-        "departure_hour_cos",
-        
-        "day_of_week_sin",
-        "day_of_week_cos",
-        
-        "month_sin",
-        "month_cos",
-
         "arrival_hour",
         "arrival_minute",
 
+        "departure_hour_sin",
+        "departure_hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "month_sin",
+        "month_cos",
+
         "distance_log",
         "is_peak_departure",
-        # "scheduled_arrival",
-        # "scheduled_departure",
-        
+
         "carrier_historical_delay",
-        "route_historical_delay",
-        
-        "origin_historical_delay",
-        
-        "origin_recent_delay_7",
-        "origin_recent_delay_30",
-           
         "carrier_recent_delay_7",
         "carrier_recent_delay_30",
-        
+
+        "route_historical_delay",
         "route_recent_delay_7",
         "route_recent_delay_30",
-        
+
+        "origin_historical_delay",
+        "origin_recent_delay_7",
+        "origin_recent_delay_30",
+
         "carrier_origin_historical_delay",
-        "aircraft_previous_delay"    
-    
+
+        "aircraft_previous_delay",
     ]
-        
 
 
 class MLflowConfig:
     """Configuration related to MLflow."""
 
-    TRACKING_URI: str = "sqlite:///mlflow.db"
-    
-    DATA_PATH: str = "data/"
+    TRACKING_URI: str = "MLFLOW_TRACKING_URI"
+    MODEL_URI: str = "MLFLOW_MODEL_URI"
 
     EXPERIMENT_NAME: str = (
         "flight_arr_delay_prediction_categorical_features_V3"
     )
-
-
 
 
 class APIConfig:
@@ -112,14 +113,11 @@ class APIConfig:
 
 
 class Config:
-    """
-    Main configuration class.
-
-    Combines all project configurations.
-    """
+    """Main project configuration."""
 
     DATA: Type[DataConfig] = DataConfig
     MODEL: Type[ModelConfig] = ModelConfig
+    FEATURES: Type[FeatureConfig] = FeatureConfig
     PREPROCESSING: Type[PreprocessingConfig] = PreprocessingConfig
     MLFLOW: Type[MLflowConfig] = MLflowConfig
     API: Type[APIConfig] = APIConfig

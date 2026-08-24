@@ -6,11 +6,27 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     Clean flight data before feature engineering.
 
     Steps:
+    - Validate required columns
     - Remove cancelled flights
     - Remove diverted flights
-    - Remove invalid CRS elapsed time
+    - Remove invalid scheduled duration
     - Remove rows with missing target
+    - Remove extreme ARR_DELAY outliers using IQR
     """
+
+    required_columns = {
+        "CANCELLED",
+        "DIVERTED",
+        "CRS_ELAPSED_TIME",
+        "ARR_DELAY",
+    }
+
+    missing_columns = required_columns - set(df.columns)
+
+    if missing_columns:
+        raise ValueError(
+            f"Missing required columns: {sorted(missing_columns)}"
+        )
 
     df = df.copy()
 
@@ -21,38 +37,33 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df["DIVERTED"] == 0]
 
     # Remove invalid scheduled duration
-    df = df[df["CRS_ELAPSED_TIME"] >= 0]
+    df = df[df["CRS_ELAPSED_TIME"] > 0]
 
-    # Target cannot be missing
+    # Target is required for supervised learning
     df = df.dropna(subset=["ARR_DELAY"])
 
-    # Reset index
-    df = df.reset_index(drop=True)
-    # IQR
-    Q1 = df["ARR_DELAY"].quantile(0.25)
-    Q3 = df["ARR_DELAY"].quantile(0.75)
+    # Remove extreme target outliers
+    q1 = df["ARR_DELAY"].quantile(0.25)
+    q3 = df["ARR_DELAY"].quantile(0.75)
 
-    IQR = Q3 - Q1
+    iqr = q3 - q1
 
-    lower_bound = Q1 - 1.5 * IQR
-    upper_bound = Q3 + 1.5 * IQR
-    # upper_bound = 120
-    # lower_bound = -30 
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+
     df = df[
-        (df["ARR_DELAY"] >= lower_bound) &
-        (df["ARR_DELAY"] <= upper_bound)
-    ].copy()
-    print(f"Q1: {Q1}")
-    print(f"Q3: {Q3}")
-    print(f"IQR: {IQR}")
-    print(f"Lower bound: {lower_bound}")
-    print(f"Upper bound: {upper_bound}")
-    return df
+        df["ARR_DELAY"].between(
+            lower_bound,
+            upper_bound,
+        )
+    ]
+
+    return df.reset_index(drop=True)
 
 
 
 if __name__ == "__main__":
-    from load import load_data
+    from src.data.load import load_data
 
     df = load_data("data/")
 

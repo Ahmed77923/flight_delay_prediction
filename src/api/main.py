@@ -16,16 +16,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    try:
-        pipeline = load_pipeline()
-        app.state.pipeline = pipeline
-        app.state.expected_columns = get_expected_columns(pipeline)
-    except Exception as exc:
-        logger.exception("Unable to load MLflow model")
-        raise RuntimeError("Unable to load the configured MLflow model.") from exc
-    yield
-    app.state.pipeline = None
+    pipeline = load_pipeline()
+    app.state.pipeline = pipeline
+    app.state.expected_columns = get_expected_columns(pipeline)
 
+    yield
+
+    app.state.pipeline = None
 
 app = FastAPI(
     title="Flight Delay Prediction API",
