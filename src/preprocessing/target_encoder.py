@@ -6,6 +6,8 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import KFold
 
+from preprocessing import target_encoder
+
 
 class TargetEncoder(BaseEstimator, TransformerMixin):
     """
@@ -312,4 +314,4 @@ class TargetEncoder(BaseEstimator, TransformerMixin):
         # statistics using ALL training data.
         self.fit(X, y)
 
-        return oof_encoded
+        return oof_encoded 

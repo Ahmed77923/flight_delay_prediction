@@ -1,97 +1,152 @@
 from contextlib import asynccontextmanager
-import logging
-import os
-from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException, Request
+import pandas as pd
+from fastapi import FastAPI, HTTPException
 
 from config.config import Config
-from src.features.build_feature import build_features
-from src.api.model_loader import get_expected_columns, load_pipeline
-from src.api.schemas import FlightRequest, HealthResponse, PredictionResponse, request_to_dataframe
-
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-logger = logging.getLogger(__name__)
+from src.api.schemas import FlightRequest, PredictionResponse
+from src.api.model_loader import (
+    get_expected_columns,
+    get_model,
+    get_state,
+    load_model,
+)
+from src.features.build_feature import MODEL_FEATURES, build_features
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    pipeline = load_pipeline()
-    app.state.pipeline = pipeline
-    app.state.expected_columns = get_expected_columns(pipeline)
+async def lifespan(app: FastAPI):
+    """
+    Load the MLflow model once when the API starts.
+    """
+
+    load_model()
 
     yield
 
-    app.state.pipeline = None
 
 app = FastAPI(
-    title="Flight Delay Prediction API",
+    title="Flight Arrival Delay Prediction API",
+    description="Predict ARR_DELAY using the trained LightGBM model.",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 
-def _get_pipeline(request: Request) -> Any:
-    pipeline = getattr(request.app.state, "pipeline", None)
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Model is not loaded.")
-    return pipeline
+@app.get("/")
+def root():
+    return {
+        "message": "Flight Arrival Delay Prediction API",
+        "status": "running",
+    }
 
 
-@app.get("/", tags=["service"])
-def root() -> dict[str, str]:
-    return {"status": "ok", "service": "Flight Delay Prediction API"}
-
-
-@app.get("/health", response_model=HealthResponse, tags=["service"])
-def health(request: Request) -> HealthResponse:
-    loaded = getattr(request.app.state, "pipeline", None) is not None
-    return HealthResponse(
-        status="healthy" if loaded else "unhealthy",
-        model_loaded=loaded,
-    )
-
-
-@app.post("/predict", response_model=PredictionResponse, tags=["prediction"])
-def predict(flight: FlightRequest, request: Request) -> PredictionResponse:
-    """Predict flight delay for a single flight record.
-
-    Flow:
-    1. Validate request with Pydantic (FlightRequest)
-    2. Convert to DataFrame with ARR_DELAY as float64 NaN (request_to_dataframe)
-    3. Apply existing feature engineering (build_features)
-    4. Predict using the loaded MLflow pipeline
+@app.get("/health")
+def health():
     """
-    pipeline = _get_pipeline(request)
+    Check whether the API and model are ready.
+    """
+
+    state = get_state()
+
+    return {
+        "status": "healthy",
+        "model_loaded": state.get("model") is not None,
+    }
+
+
+@app.post(
+    "/predict",
+    response_model=PredictionResponse,
+)
+def predict(request: FlightRequest):
+    """
+    Predict ARR_DELAY for one flight.
+
+    No historical data is used.
+    """
 
     try:
-        # Step 1-2: Request boundary ensures ARR_DELAY is float64 NaN
-        raw_frame = request_to_dataframe(flight)
+        # --------------------------------------------------
+        # 1. Convert user request to DataFrame
+        # --------------------------------------------------
 
-        # Step 3: Existing feature engineering (unchanged)
-        features = build_features(raw_frame)
+        payload = request.model_dump()
+        payload[Config.DATA.TARGET] = 0.0
 
-        # Step 4: Predict with saved pipeline
-        expected_columns = request.app.state.expected_columns
-        missing_columns = [
-            column for column in expected_columns if column not in features.columns
+        df = pd.DataFrame([payload])
+
+        # --------------------------------------------------
+        # 2. Build normal features only
+        # --------------------------------------------------
+
+        features = build_features(df)
+
+        # --------------------------------------------------
+        # 3. Build exact fitted-pipeline input columns
+        # --------------------------------------------------
+
+        model = get_model()
+        expected_columns = get_expected_columns(model)
+
+        missing = [
+            column
+            for column in expected_columns
+            if column not in features.columns
         ]
-        if missing_columns:
-            raise ValueError(
-                f"Feature engineering did not produce required columns: {missing_columns}"
-            )
-        prediction = float(pipeline.predict(features[expected_columns])[0])
-        return PredictionResponse(
-            prediction=prediction,
-            target=Config.DATA.TARGET,
-            model="lightgbm",
-            source="mlflow",
+
+        categorical = set(
+            Config.PREPROCESSING.CATEGORICAL_FEATURES
         )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Prediction failed")
+
+        for column in missing:
+            if column in categorical:
+                features[column] = "UNKNOWN"
+            else:
+                features[column] = 0.0
+
+        X = features[expected_columns]
+
+        # --------------------------------------------------
+        # 4. Prediction
+        # --------------------------------------------------
+
+        prediction = model.predict(X)
+        print("\n========== API REQUEST ==========")
+        print(df.to_dict(orient="records"))
+
+        print("\n========== FEATURES ==========")
+        print(
+            features[MODEL_FEATURES]
+            .to_string(index=False)
+        )
+
+        print("\n========== PREDICTION ==========")
+        print(prediction)
+        return PredictionResponse(
+            prediction=float(prediction[0]),
+            target="ARR_DELAY",
+            model=type(model.named_steps["model"]).__name__,
+            source="mlflow_pipeline",
+        )
+
+    except ValueError as exc:
+
         raise HTTPException(
-            status_code=422,
-            detail="Feature engineering failed for the supplied flight data.",
-        ) from exc
+            status_code=400,
+            detail=str(exc),
+        )
+
+    except RuntimeError as exc:
+
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        )
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction failed: {exc}",
+        )

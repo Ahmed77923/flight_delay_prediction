@@ -438,3 +438,89 @@ Some executable values are currently defined directly in `src/models/train.py`, 
 ## License
 
 No license file is currently included in the repository. Add a project license before distributing the code publicly.
+
+
+
+uv run mlflow server `
+>>   --host 127.0.0.1 `
+>>   --port 5000 `
+>>   --backend-store-uri sqlite:///mlflow.db `
+>>   --artifacts-destination ./mlartifacts
+
+uv run uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+
+http://127.0.0.1:8000/docs#/default/predict_predict_post
+
+uv run streamlit run app/app.py
+
+
+
+
+
+
+
+
+
+
+Load Data
+    ↓
+Clean Data
+    ↓
+Chronological Split
+    ↓
+Train Data        Test Data
+    │                  │
+    ▼                  ▼
+Build Features    Build Features
+    │                  │
+    │        history = Train Data
+    │                  │
+    └────────┬─────────┘
+             ↓
+        Split X / Y
+             ↓
+      X_train / y_train
+      X_test  / y_test
+             ↓
+        Preprocessing
+             ↓
+       Model Training
+             ↓
+          MLflow
+
+
+
+
+
+
+
+
+load_data
+   ↓
+clean_data
+   ↓
+chronological split
+   ↓
+build_features
+   ↓
+X_train / X_test / y_train / y_test
+   ↓
+validate_data
+   ↓
+train_model
+   ↓
+Pipeline
+ ┌─────────────────┐
+ │ Preprocessor    │
+ │ OneHotEncoder   │
+ └────────┬────────┘
+          ↓
+ ┌─────────────────┐
+ │ LightGBM        │
+ └────────┬────────┘
+          ↓
+      Prediction
+          ↓
+       Metrics
+          ↓
+     MLflow Model

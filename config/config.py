@@ -1,6 +1,11 @@
 from pathlib import Path
 from typing import List, Type
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
+import os
 
 class DataConfig:
     """Configuration related to data."""
@@ -12,6 +17,10 @@ class DataConfig:
     PROCESSED_DATA_DIR: Path = DATA_PATH / "processed"
 
     TARGET: str = "ARR_DELAY"
+
+    TRAINING_YEAR: int = int(
+        os.getenv("TRAINING_YEAR", "2025")
+    )
 
 
 class ModelConfig:
@@ -42,9 +51,9 @@ class PreprocessingConfig:
     """Configuration for model preprocessing."""
 
     CATEGORICAL_FEATURES: List[str] = [
-        "OP_UNIQUE_CARRIER",
-        "ORIGIN",
-        "DEST",
+        "OP_UNIQUE_CARRIER",                        
+        "ORIGIN",                                  
+        "DEST",                                    
         "route",
         "departure_period",
         "carrier_origin",
@@ -56,6 +65,7 @@ class PreprocessingConfig:
 
         "year",
         "month",
+        "quarter",
         "day",
         "day_of_week",
         "week_of_year",
@@ -63,8 +73,10 @@ class PreprocessingConfig:
 
         "departure_hour",
         "departure_minute",
+        "departure_time_minutes",
         "arrival_hour",
         "arrival_minute",
+        "arrival_time_minutes",
 
         "departure_hour_sin",
         "departure_hour_cos",
@@ -76,35 +88,39 @@ class PreprocessingConfig:
         "distance_log",
         "is_peak_departure",
 
-        "carrier_historical_delay",
-        "carrier_recent_delay_7",
-        "carrier_recent_delay_30",
-
-        "route_historical_delay",
-        "route_recent_delay_7",
-        "route_recent_delay_30",
-
-        "origin_historical_delay",
-        "origin_recent_delay_7",
-        "origin_recent_delay_30",
-
-        "carrier_origin_historical_delay",
-
-        "aircraft_previous_delay",
+        # Historical features  
+        # i have problem with these features, so i will not use them for now
+        # "carrier_historical_delay",
+        # "route_historical_delay",
+        # "origin_historical_delay",
+        # "carrier_origin_historical_delay",
+        # "aircraft_previous_delay",
+        # "carrier_recent_delay_7",
+        # "carrier_recent_delay_30",
+        # "route_recent_delay_7",
+        # "route_recent_delay_30",
+        # "origin_recent_delay_7",
+        # "origin_recent_delay_30",
     ]
+
 
 
 class MLflowConfig:
     """Configuration related to MLflow."""
 
-    TRACKING_URI: str = "MLFLOW_TRACKING_URI"
-    MODEL_URI: str = "MLFLOW_MODEL_URI"
-
-    EXPERIMENT_NAME: str = (
-        "flight_arr_delay_prediction_categorical_features_V3"
+    TRACKING_URI: str = os.getenv(
+        "MLFLOW_TRACKING_URI",
+         "http://127.0.0.1:5000",
     )
 
+    MODEL_URI: str = os.getenv(
+        "MLFLOW_MODEL_URI",
+        "runs:/94c6dd2a7b5340849733f1089e979ae7/model",
+    )
 
+    EXPERIMENT_NAME: str = (
+        "flight_arr_delay_prediction_V4"
+    )
 class APIConfig:
     """Configuration related to FastAPI."""
 

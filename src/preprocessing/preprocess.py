@@ -1,6 +1,5 @@
-from typing import Tuple
+from __future__ import annotations
 
-from sklearn.model_selection import train_test_split
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
@@ -10,86 +9,8 @@ from sklearn.impute import SimpleImputer
 
 from config.config import Config
 
+
 def build_preprocessor() -> ColumnTransformer:
-    """
-    Build the preprocessing transformer.
-
-    Numerical:
-        Median imputation
-
-    Categorical:
-        One-hot encoding with unknown categories ignored.
-    """
-
-    # ========================================================
-    # FEATURES
-    # ========================================================
-
-    numerical_features = Config.PREPROCESSING.NUMERICAL_FEATURES
-    categorical_features = Config.PREPROCESSING.CATEGORICAL_FEATURES
-
-    # ========================================================
-    # NUMERICAL PIPELINE
-    # ========================================================
-
-    numerical_pipeline = Pipeline(
-        steps=[
-            (
-                "imputer",
-                SimpleImputer(
-                    strategy="median"
-                )
-            )
-        ]
-    )
-
-    # ========================================================
-    # COLUMN TRANSFORMER
-    # ========================================================
-
-    preprocessor = ColumnTransformer(
-        transformers=[
-            (
-                "numerical",
-                numerical_pipeline,
-                numerical_features
-            ),
-            (
-                "onehot",
-                OneHotEncoder(handle_unknown="ignore"),
-                categorical_features,
-            ),
-        ],
-        remainder="drop",
-        sparse_threshold=1.0,
-    )
-
-    return preprocessor
-
-
-# i shoud delete this function because it is not used in the code------------------------
-def preprocess_data(
-    X_train: pd.DataFrame,
-    X_test: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame, SimpleImputer]:
-    """
-    Preprocessing for LightGBM native categorical features.
-
-    Numerical:
-        Median imputation
-
-    Categorical:
-        Convert to pandas category dtype.
-
-    IMPORTANT:
-        No OneHotEncoder.
-        No ColumnTransformer.
-
-        LightGBM receives categorical columns directly.
-    """
-
-    X_train = X_train.copy()
-    X_test = X_test.copy()
 
     numerical_features = (
         Config.PREPROCESSING.NUMERICAL_FEATURES
@@ -99,185 +20,195 @@ def preprocess_data(
         Config.PREPROCESSING.CATEGORICAL_FEATURES
     )
 
-    # ========================================================
-    # NUMERICAL FEATURES
-    # ========================================================
-
-    numerical_imputer = SimpleImputer(
-        strategy="median"
-    )
-
-    X_train[numerical_features] = (
-        numerical_imputer.fit_transform(
-            X_train[numerical_features]
-        )
-    )
-
-    X_test[numerical_features] = (
-        numerical_imputer.transform(
-            X_test[numerical_features]
-        )
-    )
-
-    # ========================================================
-    # CATEGORICAL FEATURES
-    # ========================================================
-
-    for col in categorical_features:
-
-        # Combine train + test categories so both datasets
-        # use the same category definition.
-        categories = pd.concat(
-            [
-                X_train[col],
-                X_test[col]
-            ]
-        ).astype("category").cat.categories
-
-        X_train[col] = pd.Categorical(
-            X_train[col],
-            categories=categories
-        )
-
-        X_test[col] = pd.Categorical(
-            X_test[col],
-            categories=categories
-        )
-
-    return (
-        X_train,
-        X_test,
-        numerical_imputer,
-    )
-
-
-def split_data( 
-    df: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-
-    target = Config.DATA.TARGET
-
-    df = df.dropna(
-        subset=[target]
-    ).copy()
-
-    if "FL_DATE" not in df.columns:
-        raise ValueError("FL_DATE is required for chronological splitting.")
-
-    df["FL_DATE"] = pd.to_datetime(df["FL_DATE"], errors="coerce")
-    if df["FL_DATE"].isna().any():
-        raise ValueError("FL_DATE contains values that cannot be parsed as dates.")
-
-    df = df.sort_values("FL_DATE").reset_index(drop=True)
-
-    X = df.drop(
-        columns=[
-            target,
-            "FL_DATE"
+    numerical_pipeline = Pipeline(
+        steps=[
+            (
+                "imputer",
+                SimpleImputer(
+                    strategy="median"
+                ),
+            )
         ]
     )
 
-    y = df[target]
-
-    split_index = int(len(df) * (1 - Config.MODEL.TEST_SIZE))
-    if split_index <= 0 or split_index >= len(df):
-        raise ValueError("The dataset is too small for the configured test split.")
-
-    X_train = X.iloc[:split_index].copy()
-    X_test = X.iloc[split_index:].copy()
-    y_train = y.iloc[:split_index].copy()
-    y_test = y.iloc[split_index:].copy()
-
-    print("\nTrain shape:", X_train.shape)
-    print("Test shape :", X_test.shape)
-
-    return (
-        X_train,
-        X_test,
-        y_train,
-        y_test
+    preprocessor = ColumnTransformer(
+        transformers=[
+            (
+                "numerical",
+                numerical_pipeline,
+                numerical_features,
+            ),
+            (
+                "categorical",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=True,
+                ),
+                categorical_features,
+            ),
+        ],
+        remainder="drop",
     )
 
+    return preprocessor
 
 
+def preprocess_data(
+    df: pd.DataFrame,
+    preprocessor: ColumnTransformer,
+    fit: bool = False,
+):
+    if fit:
+        return preprocessor.fit_transform(df)
+
+    return preprocessor.transform(df)
+
+
+    
+    
+    
+    
+    
+    
 if __name__ == "__main__":
+    import argparse
+    import numpy as np  
 
     from src.data.load import load_data
     from src.data.clean_data import clean_data
+    from src.data.split_data import split_data
     from src.features.build_feature import build_features
 
-    data_dir = "data/"
+    parser = argparse.ArgumentParser()
 
-    # ========================================================
+    parser.add_argument(
+        "--sample_size",
+        type=int,
+        default=None,
+        help="Number of rows to use for testing",
+    )
+
+    args = parser.parse_args()
+
+    # ======================================================
     # LOAD
-    # ========================================================
+    # ======================================================
 
-    df = load_data(
-        data_dir
-    )
+    df = load_data("data/")
 
-    # ========================================================
+    # ======================================================
+    # SAMPLE
+    # ======================================================
+
+    if args.sample_size is not None:
+        df = df.head(args.sample_size)
+
+    print(f"Using rows: {len(df):,}")
+
+    # ======================================================
     # CLEAN
-    # ========================================================
+    # ======================================================
 
-    df = clean_data(
-        df
-    )
+    df = clean_data(df)
 
-    # ========================================================
-    # FEATURES
-    # ========================================================
-
-    df = build_features(
-        df
-    )
-
-    # ========================================================
+    # ======================================================
     # SPLIT
-    # ========================================================
+    # ======================================================
 
-    (
-        X_train,
-        X_test,
-        y_train,
-        y_test
-    ) = train_test_split(
-        df.drop(columns=[Config.DATA.TARGET]),
-        df[Config.DATA.TARGET],
-        test_size=Config.MODEL.TEST_SIZE,
-        random_state=Config.MODEL.RANDOM_STATE
-    )
-    print("\nX_train shape:",X_train.shape)
+    train_df, test_df = split_data(df)
 
+    print(f"Train size: {len(train_df):,}")
+    print(f"Test size : {len(test_df):,}")
 
-    print("X_test shape:",X_test.shape)
+    # ======================================================
+    # FEATURES
+    # ======================================================
 
-    print(
-        "\ny_train shape:",
-        y_train.shape
+    train_features = build_features(
+        train_df
     )
 
-    print(
-        "y_test shape:",
-        y_test.shape
+    test_features = build_features(
+        test_df,
+        history=train_df,
     )
 
-    # ========================================================
-    # PREPROCESSING
-    # ========================================================
+    # ======================================================
+    # X / Y
+    # ======================================================
+
+    model_features = (
+        Config.PREPROCESSING.CATEGORICAL_FEATURES
+        + Config.PREPROCESSING.NUMERICAL_FEATURES
+    )
+
+    X_train = train_features[
+        model_features
+    ]
+
+    y_train = train_features[
+        Config.DATA.TARGET
+    ]
+
+    X_test = test_features[
+        model_features
+    ]
+
+    y_test = test_features[
+        Config.DATA.TARGET
+    ]
+
+    print("\nX_train:", X_train.shape)
+    print("y_train:", y_train.shape)
+
+    print("X_test :", X_test.shape)
+    print("y_test :", y_test.shape)
+
+    # ======================================================
+    # PREPROCESSOR
+    # ======================================================
 
     preprocessor = build_preprocessor()
 
-    X_train_processed = preprocessor.fit_transform(X_train)
+    # Train → fit + transform
+    X_train_processed = preprocess_data(
+        X_train,
+        preprocessor,
+        fit=True,
+    )
 
-    X_test_processed = preprocessor.transform(X_test)
+    # Test → transform only
+    X_test_processed = preprocess_data(
+        X_test,
+        preprocessor,
+        fit=False,
+    )
+
+    # ======================================================
+    # RESULTS
+    # ======================================================
 
     print(
-        "\nProcessed X_train shape:",
-        X_train_processed.shape
+        "\nProcessed X_train:",
+        X_train_processed.shape,
     )
 
     print(
-        "Processed X_test shape:",
-        X_test_processed.shape
+        "Processed X_test :",
+        X_test_processed.shape,
+    )
+
+    print(
+        "Processed type   :",
+        type(X_train_processed),
+    )
+
+    print(
+        "Train NaN:",
+        np.isnan(X_train_processed.data).sum(),
+    )
+
+    print(
+        "Test NaN :",
+        np.isnan(X_test_processed.data).sum(),
     )
