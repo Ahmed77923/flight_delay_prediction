@@ -30,21 +30,8 @@ class ModelConfig:
     RANDOM_STATE: int = 42
 
     MODEL_NAME: str = "flight-arr-delay"
+    MODEL_ALIAS: str = "flight-arr-delay"
     MODEL_DIR: Path = DataConfig.PROJECT_ROOT / "models"
-
-
-class FeatureConfig:
-    """Configuration for feature engineering and online feature serving."""
-
-    FEATURE_STATE_DIR: Path = (
-        DataConfig.PROJECT_ROOT / "models" / "feature_state"
-    )
-
-    FEATURE_STATE_FILE: Path = (
-        FEATURE_STATE_DIR / "feature_state.joblib"
-    )
-
-    RECENT_WINDOWS: tuple[int, ...] = (7, 30)
 
 
 class PreprocessingConfig:
@@ -57,6 +44,7 @@ class PreprocessingConfig:
         "route",
         "departure_period",
         "carrier_origin",
+
     ]
 
     NUMERICAL_FEATURES: List[str] = [
@@ -88,44 +76,40 @@ class PreprocessingConfig:
         "distance_log",
         "is_peak_departure",
 
-        # Historical features  
-        # i have problem with these features, so i will not use them for now
-        # "carrier_historical_delay",
-        # "route_historical_delay",
-        # "origin_historical_delay",
-        # "carrier_origin_historical_delay",
-        # "aircraft_previous_delay",
-        # "carrier_recent_delay_7",
-        # "carrier_recent_delay_30",
-        # "route_recent_delay_7",
-        # "route_recent_delay_30",
-        # "origin_recent_delay_7",
-        # "origin_recent_delay_30",
+        
     ]
-
-
 
 class MLflowConfig:
     """Configuration related to MLflow."""
 
     TRACKING_URI: str = os.getenv(
         "MLFLOW_TRACKING_URI",
-         "http://127.0.0.1:5000",
+        "http://127.0.0.1:5000",
     )
 
     MODEL_URI: str = os.getenv(
         "MLFLOW_MODEL_URI",
-        "runs:/94c6dd2a7b5340849733f1089e979ae7/model",
+        "mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts",
     )
 
     EXPERIMENT_NAME: str = (
-        "flight_arr_delay_prediction_V4"
+        "flight_arr_delay_champion_model"
     )
+
 class APIConfig:
     """Configuration related to FastAPI."""
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+
+    # Base URL HTTP clients (e.g. the Streamlit UI) use to reach the
+    # FastAPI service. Kept separate from HOST/PORT, which describe the
+    # bind address the server listens on, not necessarily how a client
+    # reaches it.
+    BASE_URL: str = os.getenv(
+        "API_URL",
+        "http://127.0.0.1:8000",
+    )
 
 
 class Config:
@@ -133,7 +117,6 @@ class Config:
 
     DATA: Type[DataConfig] = DataConfig
     MODEL: Type[ModelConfig] = ModelConfig
-    FEATURES: Type[FeatureConfig] = FeatureConfig
     PREPROCESSING: Type[PreprocessingConfig] = PreprocessingConfig
     MLFLOW: Type[MLflowConfig] = MLflowConfig
     API: Type[APIConfig] = APIConfig

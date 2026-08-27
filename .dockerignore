@@ -6,7 +6,26 @@ __pycache__
 .pytest_cache
 .ipynb_checkpoints
 data
-mlruns
 notebook
 *.csv
 *.ipynb
+tests
+
+# Secrets / local-only config - never bake into the image.
+.env
+
+# Unused legacy artifact (not loaded by the runtime code).
+models
+
+# MLflow local tracking store - large and mostly dev-only. The Dockerfile
+# copies in only the one model artifact directory the API actually serves,
+# via the exceptions below. Keep this in sync with the Dockerfile's
+# MLFLOW_MODEL_ID build arg if the served model ever changes.
+mlflow.db
+mlflow_flight_delay.db
+mlruns
+!mlruns/4
+!mlruns/4/models
+!mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8
+!mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts
+!mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts/**

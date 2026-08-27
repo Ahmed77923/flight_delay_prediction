@@ -1,12 +1,13 @@
-# src/api/model_loader.py
-
 from __future__ import annotations
 
+import sys
 import logging
+from pathlib import Path
 from typing import Any
 
 import mlflow
 import mlflow.sklearn
+from mlflow import MlflowClient
 from dotenv import load_dotenv
 
 from config.config import Config
@@ -20,6 +21,18 @@ load_dotenv()
 
 
 # ============================================================
+# PATHS
+# ============================================================
+
+_API_DIR = Path(__file__).resolve().parent
+_SRC_DIR = _API_DIR.parent
+_PROJECT_DIR = _SRC_DIR.parent
+
+sys.path.insert(0, str(_PROJECT_DIR))
+sys.path.insert(0, str(_SRC_DIR))
+
+
+# ============================================================
 # LOGGER
 # ============================================================
 
@@ -27,87 +40,107 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# MODEL STATE
+# MLFLOW CONFIGURATION
+# ============================================================
+#
+# Config is the single source of truth for tracking/model URIs
+# (itself backed by the MLFLOW_TRACKING_URI / MLFLOW_MODEL_URI
+# env vars). Do not duplicate the lookup here - a previous drift
+# between this module's defaults and config/config.py's defaults
+# caused the API to silently keep loading a stale model.
+
+MLFLOW_TRACKING_URI = Config.MLFLOW.TRACKING_URI
+
+MODEL_URI = Config.MLFLOW.MODEL_URI
+
+
+# ============================================================
+# APPLICATION STATE
 # ============================================================
 
-_MODEL: Any | None = None
-
-
-# ============================================================
-# LOAD MODEL
-# ============================================================
-
-def load_model() -> Any:
+class ModelState:
     """
-    Load the trained MLflow sklearn pipeline once.
+    Holds the loaded MLflow pipeline
+    and model information.
+    """
 
-    The loaded object must expose:
-        predict()
+    model: Any = None
+
+    version: str = "unknown"
+
+    source: str = "mlflow"
+
+    model_uri: str = MODEL_URI
+
+    expected_columns: list[str] = []
+
+_state = ModelState()
+
+
+# ============================================================
+# LOAD PIPELINE
+# ============================================================
+
+def load_pipeline() -> None:
+    """
+    Load the complete sklearn pipeline from MLflow.
+
+    The model is loaded once during FastAPI startup.
 
     Expected pipeline structure:
 
         Pipeline
         ├── preprocessor
         └── model
+
+    The loaded pipeline must expose:
+        predict()
     """
 
-    global _MODEL
-
-    # --------------------------------------------------------
-    # Return already loaded model
-    # --------------------------------------------------------
-
-    if _MODEL is not None:
-
-        logger.info(
-            "MLflow model already loaded."
-        )
-
-        return _MODEL
-
-    # --------------------------------------------------------
-    # Configuration
-    # --------------------------------------------------------
-
-    tracking_uri = Config.MLFLOW.TRACKING_URI
-    model_uri = Config.MLFLOW.MODEL_URI
-
-    if not tracking_uri:
-        raise RuntimeError(
-            "MLflow tracking URI is not configured."
-        )
-
-    if not model_uri:
-        raise RuntimeError(
-            "MLflow model URI is not configured."
-        )
+    # ========================================================
+    # LOG CONFIGURATION
+    # ========================================================
 
     logger.info(
         "MLflow tracking URI: %s",
-        tracking_uri,
+        MLFLOW_TRACKING_URI,
     )
 
     logger.info(
         "MLflow model URI: %s",
-        model_uri,
+        MODEL_URI,
     )
 
-    # --------------------------------------------------------
-    # Configure MLflow
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE CONFIGURATION
+    # ========================================================
+
+    if not MLFLOW_TRACKING_URI:
+        raise RuntimeError(
+            "MLFLOW_TRACKING_URI is not configured."
+        )
+
+    if not MODEL_URI:
+        raise RuntimeError(
+            "MLFLOW_MODEL_URI is not configured."
+        )
+
+    # ========================================================
+    # CONFIGURE MLFLOW
+    # ========================================================
 
     mlflow.set_tracking_uri(
-        tracking_uri
+        MLFLOW_TRACKING_URI
     )
 
-    # --------------------------------------------------------
-    # Load model
-    # --------------------------------------------------------
+    # ========================================================
+    # LOAD MODEL
+    # ========================================================
 
     try:
 
         pipeline = mlflow.sklearn.load_model(
-            model_uri
+            MODEL_URI
         )
 
     except Exception as exc:
@@ -117,34 +150,33 @@ def load_model() -> Any:
         )
 
         raise RuntimeError(
-            f"Could not load MLflow model: {model_uri}"
+            f"Could not load MLflow model: "
+            f"{MODEL_URI}"
         ) from exc
 
-    # --------------------------------------------------------
-    # Validate predict()
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE predict()
+    # ========================================================
 
     if not hasattr(
         pipeline,
         "predict",
     ):
-
         raise RuntimeError(
-            "The loaded MLflow artifact does not "
+            "Loaded MLflow model does not "
             "expose predict()."
         )
 
-    # --------------------------------------------------------
-    # Validate sklearn Pipeline
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE SKLEARN PIPELINE
+    # ========================================================
 
     if not hasattr(
         pipeline,
         "named_steps",
     ):
-
         raise RuntimeError(
-            "The loaded MLflow model is not "
+            "Loaded MLflow model is not "
             "a sklearn Pipeline."
         )
 
@@ -155,34 +187,37 @@ def load_model() -> Any:
         list(named_steps.keys()),
     )
 
-    # --------------------------------------------------------
-    # Validate preprocessor
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE PREPROCESSOR
+    # ========================================================
 
     preprocessor = named_steps.get(
         "preprocessor"
     )
 
     if preprocessor is None:
-
         raise RuntimeError(
-            "The loaded pipeline does not contain "
-            "'preprocessor'."
+            "Pipeline does not contain "
+            "'preprocessor' step."
         )
 
-    # --------------------------------------------------------
-    # Validate model
-    # --------------------------------------------------------
+    logger.info(
+        "Preprocessor type: %s",
+        type(preprocessor).__name__,
+    )
+
+    # ========================================================
+    # VALIDATE MODEL
+    # ========================================================
 
     model = named_steps.get(
         "model"
     )
 
     if model is None:
-
         raise RuntimeError(
-            "The loaded pipeline does not contain "
-            "'model'."
+            "Pipeline does not contain "
+            "'model' step."
         )
 
     logger.info(
@@ -190,104 +225,9 @@ def load_model() -> Any:
         type(model).__name__,
     )
 
-    # --------------------------------------------------------
-    # Store model in memory
-    # --------------------------------------------------------
-
-    _MODEL = pipeline
-
-    logger.info(
-        "MLflow model loaded successfully."
-    )
-
-    return _MODEL
-
-
-# ============================================================
-# GET MODEL
-# ============================================================
-
-def get_model() -> Any:
-    """
-    Return the loaded model.
-
-    Raises an error if the model has not been loaded.
-    """
-
-    if _MODEL is None:
-
-        raise RuntimeError(
-            "Model is not loaded. "
-            "Call load_model() during application startup."
-        )
-
-    return _MODEL
-
-
-# ============================================================
-# GET STATE
-# ============================================================
-
-def get_state() -> dict[str, Any]:
-    """
-    Return the current API model state.
-    """
-
-    return {
-        "model": _MODEL,
-        "loaded": _MODEL is not None,
-    }
-
-
-# ============================================================
-# EXPECTED INPUT COLUMNS
-# ============================================================
-
-def get_expected_columns(
-    pipeline: Any | None = None,
-) -> list[str]:
-    """
-    Return the raw feature columns expected by
-    the fitted preprocessor.
-
-    If no pipeline is supplied, the loaded model
-    is used.
-    """
-
-    if pipeline is None:
-        pipeline = get_model()
-
-    # --------------------------------------------------------
-    # Validate Pipeline
-    # --------------------------------------------------------
-
-    if not hasattr(
-        pipeline,
-        "named_steps",
-    ):
-
-        raise RuntimeError(
-            "Loaded model is not a sklearn Pipeline."
-        )
-
-    # --------------------------------------------------------
-    # Get preprocessor
-    # --------------------------------------------------------
-
-    preprocessor = pipeline.named_steps.get(
-        "preprocessor"
-    )
-
-    if preprocessor is None:
-
-        raise RuntimeError(
-            "Pipeline does not contain "
-            "'preprocessor'."
-        )
-
-    # --------------------------------------------------------
-    # Get input columns
-    # --------------------------------------------------------
+    # ========================================================
+    # GET EXPECTED INPUT COLUMNS
+    # ========================================================
 
     expected_columns = getattr(
         preprocessor,
@@ -298,50 +238,151 @@ def get_expected_columns(
     if expected_columns is None:
 
         raise RuntimeError(
-            "The fitted preprocessor does not contain "
+            "Fitted preprocessor does not contain "
             "'feature_names_in_'."
         )
 
-    columns = list(
+    expected_columns = list(
         expected_columns
     )
 
+    # ========================================================
+    # VALIDATE EXPECTED COLUMNS
+    # ========================================================
+
+    if not expected_columns:
+
+        raise RuntimeError(
+            "The fitted preprocessor has "
+            "no expected input columns."
+        )
+
     logger.info(
-        "Expected input columns: %d",
-        len(columns),
+        "Expected input features: %d",
+        len(expected_columns),
     )
 
-    logger.debug(
+    logger.info(
         "Expected columns: %s",
-        columns,
+        expected_columns,
     )
 
-    return columns
+    # ========================================================
+    # STORE MODEL STATE
+    # ========================================================
+
+    _state.model = pipeline
+
+    _state.expected_columns = (
+        expected_columns
+    )
+
+    _state.source = "mlflow"
+
+    _state.model_uri = MODEL_URI
+
+    # ========================================================
+    # SUCCESS
+    # ========================================================
+
+    logger.info(
+        "MLflow pipeline loaded successfully."
+    )
+
+    logger.info(
+        "Model source: %s",
+        MODEL_URI,
+    )
+
+    logger.info(
+        "Model ready for prediction."
+    )
+
+# ============================================================
+# GET STATE
+# ============================================================
+
+def get_state() -> ModelState:
+    """
+    Return current model state.
+    """
+
+    return _state
 
 
 # ============================================================
-# MODEL INFORMATION
+# GET MODEL
 # ============================================================
 
-def get_model_info(
-    pipeline: Any | None = None,
-) -> dict[str, Any]:
+def get_model() -> Any:
+    """
+    Return loaded MLflow pipeline.
+    """
+
+    if _state.model is None:
+
+        raise RuntimeError(
+            "Model has not been loaded."
+        )
+
+    return _state.model
+
+
+# ============================================================
+# GET EXPECTED COLUMNS
+# ============================================================
+
+def get_expected_columns() -> list[str]:
+    """
+    Return raw columns expected by
+    the fitted preprocessor.
+    """
+
+    if not _state.expected_columns:
+
+        raise RuntimeError(
+            "Model has not been loaded "
+            "or expected columns are unavailable."
+        )
+
+    return _state.expected_columns
+
+
+# ============================================================
+# GET MODEL INFO
+# ============================================================
+
+def get_model_info() -> dict[str, Any]:
     """
     Return information about the loaded model.
     """
 
-    if pipeline is None:
-        pipeline = get_model()
+    if _state.model is None:
+
+        return {
+            "loaded": False,
+            "source": "mlflow",
+        }
+
+    pipeline = _state.model
 
     info: dict[str, Any] = {
+        "loaded": True,
+        "source": _state.source,
+        "model_uri": _state.model_uri,
+        "version": _state.version,
+        "model_name": Config.MODEL.MODEL_NAME,
         "pipeline_type": type(
             pipeline
         ).__name__,
+        "expected_features": len(
+            _state.expected_columns
+        ),
+        "expected_columns": list(
+            _state.expected_columns
+        ),
+        "historical_features_used": False,
     }
-
-    # --------------------------------------------------------
-    # Pipeline information
-    # --------------------------------------------------------
 
     if hasattr(
         pipeline,
@@ -351,10 +392,6 @@ def get_model_info(
         info["pipeline_steps"] = list(
             pipeline.named_steps.keys()
         )
-
-        # ----------------------------------------------------
-        # Model
-        # ----------------------------------------------------
 
         model = pipeline.named_steps.get(
             "model"
@@ -366,27 +403,17 @@ def get_model_info(
                 model
             ).__name__
 
-        # ----------------------------------------------------
-        # Preprocessor
-        # ----------------------------------------------------
-
-        preprocessor = pipeline.named_steps.get(
-            "preprocessor"
+        preprocessor = (
+            pipeline.named_steps.get(
+                "preprocessor"
+            )
         )
 
         if preprocessor is not None:
 
-            columns = getattr(
-                preprocessor,
-                "feature_names_in_",
-                None,
-            )
-
-            if columns is not None:
-
-                info["input_features"] = len(
-                    columns
-                )
+            info["preprocessor_type"] = type(
+                preprocessor
+            ).__name__
 
     return info
 
@@ -401,48 +428,49 @@ if __name__ == "__main__":
         level=logging.INFO,
     )
 
-    try:
+    load_pipeline()
 
-        pipeline = load_model()
+    state = get_state()
 
-        expected_columns = (
-            get_expected_columns(
-                pipeline
-            )
-        )
+    print("\n" + "=" * 70)
+    print("MODEL LOADED")
+    print("=" * 70)
 
-        model_info = get_model_info(
-            pipeline
-        )
+    print(
+        "\nModel:",
+        Config.MODEL.MODEL_NAME,
+    )
 
-        print("\n" + "=" * 70)
-        print("MODEL LOADED")
-        print("=" * 70)
+    print(
+        "Alias:",
+        Config.MODEL.MODEL_ALIAS,
+    )
 
-        print("\nModel information:")
+    print(
+        "Version:",
+        state.version,
+    )
 
-        for key, value in model_info.items():
+    print(
+        "Expected features:",
+        len(state.expected_columns),
+    )
 
-            print(
-                f"{key}: {value}"
-            )
+    print("\nExpected columns:")
 
-        print("\nExpected input columns:")
-
-        for column in expected_columns:
-
-            print(
-                f"  - {column}"
-            )
-
+    for column in state.expected_columns:
         print(
-            "\nModel loading test passed."
+            f"  - {column}"
         )
 
-    except Exception:
+    print(
+        "\nModel information:"
+    )
 
-        logger.exception(
-            "Model loading test failed."
-        )
+    print(
+        get_model_info()
+    )
 
-        raise
+    print(
+        "\nModel loading test passed."
+    )

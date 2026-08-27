@@ -1,93 +1,248 @@
+from __future__ import annotations
+
+import logging
 from contextlib import asynccontextmanager
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 
-from config.config import Config
-from src.api.schemas import FlightRequest, PredictionResponse
 from src.api.model_loader import (
-    get_expected_columns,
-    get_model,
     get_state,
-    load_model,
+    load_pipeline,
+    get_expected_columns,
+    get_model_info,
 )
-from src.features.build_feature import MODEL_FEATURES, build_features
 
+from src.api.schemas import (
+    FlightRequest,
+    PredictionResponse,
+)
+
+from src.features.build_feature import build_features
+
+
+# ============================================================
+# LOGGER
+# ============================================================
+
+logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    level=logging.INFO,
+)
+
+
+# ============================================================
+# APPLICATION STARTUP
+# ============================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Load the MLflow model once when the API starts.
-    """
 
-    load_model()
+    logger.info(
+        "Starting Flight Delay Prediction API..."
+    )
+
+    try:
+
+        # ----------------------------------------------------
+        # Load MLflow pipeline
+        # ----------------------------------------------------
+
+        load_pipeline()
+
+        state = get_state()
+
+        # ----------------------------------------------------
+        # Validate model
+        # ----------------------------------------------------
+
+        if state.model is None:
+            raise RuntimeError(
+                "MLflow model was not loaded."
+            )
+
+        # ----------------------------------------------------
+        # Get expected columns
+        # ----------------------------------------------------
+
+        expected_columns = get_expected_columns()
+
+        logger.info(
+            "Expected model input columns: %d",
+            len(expected_columns),
+        )
+
+        logger.info(
+            "Model loaded successfully."
+        )
+
+        logger.info(
+            "Model type: %s",
+            type(state.model).__name__,
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Failed to initialize API."
+        )
+
+        raise
 
     yield
 
+    logger.info(
+        "Flight Delay Prediction API stopped."
+    )
+
+
+# ============================================================
+# FASTAPI
+# ============================================================
 
 app = FastAPI(
     title="Flight Arrival Delay Prediction API",
-    description="Predict ARR_DELAY using the trained LightGBM model.",
+    description=(
+        "Predict flight arrival delay using "
+        "the trained MLflow LightGBM pipeline."
+    ),
     version="1.0.0",
     lifespan=lifespan,
 )
 
 
+# ============================================================
+# ROOT
+# ============================================================
+
 @app.get("/")
 def root():
+
     return {
-        "message": "Flight Arrival Delay Prediction API",
-        "status": "running",
+        "name": "Flight Arrival Delay Prediction API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "endpoints": [
+            "/health",
+            "/model",
+            "/predict",
+        ],
     }
 
+
+# ============================================================
+# HEALTH
+# ============================================================
 
 @app.get("/health")
 def health():
-    """
-    Check whether the API and model are ready.
-    """
 
     state = get_state()
 
+    if state.model is None:
+
+        return {
+            "status": "unhealthy",
+            "model_loaded": False,
+        }
+
     return {
         "status": "healthy",
-        "model_loaded": state.get("model") is not None,
+        "model_loaded": True,
+        "model_type": type(
+            state.model
+        ).__name__,
     }
 
+
+# ============================================================
+# MODEL INFO
+# ============================================================
+
+@app.get("/model")
+def model_info():
+
+    state = get_state()
+
+    if state.model is None:
+
+        raise HTTPException(
+            status_code=503,
+            detail="Model not loaded.",
+        )
+
+    return get_model_info()
+
+
+# ============================================================
+# PREDICT
+# ============================================================
 
 @app.post(
     "/predict",
     response_model=PredictionResponse,
 )
-def predict(request: FlightRequest):
-    """
-    Predict ARR_DELAY for one flight.
+def predict(
+    flight: FlightRequest,
+):
 
-    No historical data is used.
-    """
+    # --------------------------------------------------------
+    # Get shared model state
+    # --------------------------------------------------------
+
+    state = get_state()
+
+    if state.model is None:
+
+        raise HTTPException(
+            status_code=503,
+            detail="Model not loaded.",
+        )
 
     try:
-        # --------------------------------------------------
-        # 1. Convert user request to DataFrame
-        # --------------------------------------------------
 
-        payload = request.model_dump()
-        payload[Config.DATA.TARGET] = 0.0
+        # ====================================================
+        # 1. REQUEST → DATAFRAME
+        # ====================================================
 
-        df = pd.DataFrame([payload])
+        df = pd.DataFrame(
+            [flight.model_dump()]
+        )
 
-        # --------------------------------------------------
-        # 2. Build normal features only
-        # --------------------------------------------------
+        logger.info(
+            "Received flight request: %s",
+            df.to_dict(
+                orient="records"
+            )[0],
+        )
 
-        features = build_features(df)
+        # ====================================================
+        # 2. FEATURE ENGINEERING
+        # ====================================================
 
-        # --------------------------------------------------
-        # 3. Build exact fitted-pipeline input columns
-        # --------------------------------------------------
+        features = build_features(
+            df
+        )
 
-        model = get_model()
-        expected_columns = get_expected_columns(model)
+        logger.info(
+            "Feature engineering completed. "
+            "Shape: %s",
+            features.shape,
+        )
+
+        logger.info(
+            "Generated features: %s",
+            list(features.columns),
+        )
+
+        # ====================================================
+        # 3. EXPECTED MODEL FEATURES
+        # ====================================================
+
+        expected_columns = (
+            get_expected_columns()
+        )
 
         missing = [
             column
@@ -95,58 +250,98 @@ def predict(request: FlightRequest):
             if column not in features.columns
         ]
 
-        categorical = set(
-            Config.PREPROCESSING.CATEGORICAL_FEATURES
+        if missing:
+
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "Missing model features",
+                    "missing_columns": missing,
+                },
+            )
+
+        # ----------------------------------------------------
+        # Select exactly the features used during training
+        # ----------------------------------------------------
+
+        X = features[
+            expected_columns
+        ]
+
+        # ====================================================
+        # 4. CHECK NaN
+        # ====================================================
+
+        if X.isna().any().any():
+
+            null_columns = (
+                X.columns[
+                    X.isna().any()
+                ].tolist()
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "Model input contains NaN",
+                    "columns": null_columns,
+                },
+            )
+
+        logger.info(
+            "Prediction input shape: %s",
+            X.shape,
         )
 
-        for column in missing:
-            if column in categorical:
-                features[column] = "UNKNOWN"
-            else:
-                features[column] = 0.0
+        # ====================================================
+        # 5. PREDICTION
+        # ====================================================
 
-        X = features[expected_columns]
-
-        # --------------------------------------------------
-        # 4. Prediction
-        # --------------------------------------------------
-
-        prediction = model.predict(X)
-        print("\n========== API REQUEST ==========")
-        print(df.to_dict(orient="records"))
-
-        print("\n========== FEATURES ==========")
-        print(
-            features[MODEL_FEATURES]
-            .to_string(index=False)
+        prediction = float(
+            state.model.predict(X)[0]
         )
 
-        print("\n========== PREDICTION ==========")
-        print(prediction)
+        logger.info(
+            "Prediction: %.4f",
+            prediction,
+        )
+
+        # ====================================================
+        # 6. RESPONSE
+        # ====================================================
+
         return PredictionResponse(
-            prediction=float(prediction[0]),
+            prediction=round(
+                prediction,
+                2,
+            ),
             target="ARR_DELAY",
-            model=type(model.named_steps["model"]).__name__,
-            source="mlflow_pipeline",
+            model="lightgbm",
+            source="mlflow",
         )
+
+    except HTTPException:
+
+        raise
 
     except ValueError as exc:
+
+        logger.exception(
+            "Feature validation failed."
+        )
 
         raise HTTPException(
             status_code=400,
             detail=str(exc),
-        )
-
-    except RuntimeError as exc:
-
-        raise HTTPException(
-            status_code=503,
-            detail=str(exc),
-        )
+        ) from exc
 
     except Exception as exc:
 
+        logger.exception(
+            "Prediction failed."
+        )
+
         raise HTTPException(
             status_code=500,
-            detail=f"Prediction failed: {exc}",
-        )
+            detail=str(exc),
+        ) from exc

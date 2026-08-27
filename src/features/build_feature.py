@@ -7,7 +7,7 @@
 # ├── create_cyclical_features()
 # ├── create_categorical_features()
 # ├── create_numerical_features()
-# ├── create_historical_features()
+# ├── ()
 # └── build_features()
 
 from __future__ import annotations
@@ -35,8 +35,6 @@ def validate_raw_columns(df: pd.DataFrame) -> None:
         "OP_UNIQUE_CARRIER",
         "ORIGIN",
         "DEST",
-        "TAIL_NUM",
-        TARGET,
     }
 
     missing = required - set(df.columns)
@@ -169,266 +167,6 @@ def create_numerical_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def create_historical_features(
-    df: pd.DataFrame,
-    history: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    """
-    Create historical features using only observations
-    before the current flight.
-
-    The current flight target is NEVER used.
-    """
-
-    df = df.copy()
-
-    # ========================================================
-    # NO HISTORY
-    # ========================================================
-
-    if history is None or history.empty:
-
-        historical_columns = [
-            "carrier_historical_delay",
-            "carrier_recent_delay_7",
-            "carrier_recent_delay_30",
-            "route_historical_delay",
-            "route_recent_delay_7",
-            "route_recent_delay_30",
-            "origin_historical_delay",
-            "origin_recent_delay_7",
-            "origin_recent_delay_30",
-            "carrier_origin_historical_delay",
-            "aircraft_previous_delay",
-        ]
-
-        for column in historical_columns:
-            df[column] = 0.0
-
-        return df
-
-    # ========================================================
-    # PREPARE HISTORY
-    # ========================================================
-
-    history = history
-
-    # History must contain the target
-    if TARGET not in history.columns:
-        raise ValueError(
-            f"Historical data must contain target: {TARGET}"
-        )
-
-    # ========================================================
-    # SORT HISTORY
-    # ========================================================
-
-    history = (
-        history
-        .sort_values("scheduled_departure")
-        .reset_index(drop=True)
-    )
-
-    def historical_mean(group_column: str) -> pd.Series:
-        values = []
-
-        for _, row in df.iterrows():
-            eligible = history[
-                history["scheduled_departure"]
-                < row["scheduled_departure"]
-            ]
-            values.append(
-                eligible.loc[
-                    eligible[group_column] == row[group_column],
-                    TARGET,
-                ].mean()
-            )
-
-        return pd.Series(values, index=df.index, dtype="float64")
-
-    def previous_aircraft_delay() -> pd.Series:
-        values = []
-
-        for _, row in df.iterrows():
-            eligible = history[
-                (history["scheduled_departure"]
-                 < row["scheduled_departure"])
-                & (history["TAIL_NUM"] == row["TAIL_NUM"])
-            ]
-            values.append(
-                eligible.sort_values("scheduled_departure")[TARGET]
-                .iloc[-1]
-                if not eligible.empty
-                else np.nan
-            )
-
-        return pd.Series(values, index=df.index, dtype="float64")
-
-    # ========================================================
-    # HISTORICAL AGGREGATES
-    # ========================================================
-
-    # --------------------------------------------------------
-    # Carrier
-    # --------------------------------------------------------
-
-    df["carrier_historical_delay"] = historical_mean(
-        "OP_UNIQUE_CARRIER"
-    )
-
-    # --------------------------------------------------------
-    # Route
-    # --------------------------------------------------------
-
-    df["route_historical_delay"] = historical_mean("route")
-
-    # --------------------------------------------------------
-    # Origin
-    # --------------------------------------------------------
-
-    df["origin_historical_delay"] = historical_mean("ORIGIN")
-
-    # --------------------------------------------------------
-    # Carrier + Origin
-    # --------------------------------------------------------
-
-    df["carrier_origin_historical_delay"] = historical_mean(
-        "carrier_origin"
-    )
-
-    # ========================================================
-    # AIRCRAFT PREVIOUS DELAY
-    # ========================================================
-
-    # Get the latest historical flight for each aircraft.
-
-    df["aircraft_previous_delay"] = previous_aircraft_delay()
-
-    # ========================================================
-    # RECENT DELAYS
-    # ========================================================
-
-    def recent_delay(
-        current_df: pd.DataFrame,
-        history_df: pd.DataFrame,
-        group_column: str,
-        days: int,
-    ) -> pd.Series:
-
-        values = []
-
-        for _, row in current_df.iterrows():
-
-            cutoff = (
-                row["scheduled_departure"]
-                - pd.Timedelta(days=days)
-            )
-
-            mask = (
-                (history_df["scheduled_departure"] >= cutoff)
-                &
-                (
-                    history_df["scheduled_departure"]
-                    < row["scheduled_departure"]
-                )
-                &
-                (
-                    history_df[group_column]
-                    == row[group_column]
-                )
-            )
-
-            values.append(
-                history_df.loc[
-                    mask,
-                    TARGET
-                ].mean()
-            )
-
-        return pd.Series(
-            values,
-            index=current_df.index,
-            dtype="float64",
-        )
-
-    # ========================================================
-    # CARRIER RECENT
-    # ========================================================
-
-    df["carrier_recent_delay_7"] = recent_delay(
-        df,
-        history,
-        "OP_UNIQUE_CARRIER",
-        7,
-    )
-
-    df["carrier_recent_delay_30"] = recent_delay(
-        df,
-        history,
-        "OP_UNIQUE_CARRIER",
-        30,
-    )
-
-    # ========================================================
-    # ROUTE RECENT
-    # ========================================================
-
-    df["route_recent_delay_7"] = recent_delay(
-        df,
-        history,
-        "route",
-        7,
-    )
-
-    df["route_recent_delay_30"] = recent_delay(
-        df,
-        history,
-        "route",
-        30,
-    )
-
-    # ========================================================
-    # ORIGIN RECENT
-    # ========================================================
-
-    df["origin_recent_delay_7"] = recent_delay(
-        df,
-        history,
-        "ORIGIN",
-        7,
-    )
-
-    df["origin_recent_delay_30"] = recent_delay(
-        df,
-        history,
-        "ORIGIN",
-        30,
-    )
-
-    # ========================================================
-    # FILL UNKNOWN HISTORY
-    # ========================================================
-
-    historical_columns = [
-        "carrier_historical_delay",
-        "carrier_recent_delay_7",
-        "carrier_recent_delay_30",
-        "route_historical_delay",
-        "route_recent_delay_7",
-        "route_recent_delay_30",
-        "origin_historical_delay",
-        "origin_recent_delay_7",
-        "origin_recent_delay_30",
-        "carrier_origin_historical_delay",
-        "aircraft_previous_delay",
-    ]
-
-    df[historical_columns] = (
-        df[historical_columns]
-        .fillna(0.0)
-    )
-
-    return df
 
 def build_features(
     df: pd.DataFrame,
@@ -456,7 +194,7 @@ def build_features(
         history = create_categorical_features(history)
         history = create_numerical_features(history)
 
-    df = create_historical_features(df, history)
+    
 
     missing = [
         feature for feature in MODEL_FEATURES

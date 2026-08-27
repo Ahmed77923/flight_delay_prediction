@@ -1,13 +1,13 @@
 # Flight Delay Prediction
 
-An end-to-end machine learning project for predicting a flight's arrival delay in minutes. The prediction target is `ARR_DELAY`. The project combines flight schedule information, route and carrier attributes, calendar features, cyclical time features, and historical delay statistics.
+An end-to-end machine learning project for predicting a flight's arrival delay in minutes. The prediction target is `ARR_DELAY`. The project combines flight schedule information, route and carrier attributes, calendar features, and cyclical time features. Historical/rolling delay statistics were explored but are **not** used by the current model, so a prediction can be made from a single flight request with no lookup into past flights.
 
-The current training pipeline uses a LightGBM regression model with median imputation for numerical columns and sparse one-hot encoding for categorical columns. Training runs and metrics are tracked with MLflow.
+The current training pipeline uses a LightGBM regression model with constant (zero) imputation for numerical columns and sparse one-hot encoding for categorical columns. Training runs and metrics are tracked with MLflow.
 
 ## Project Goals
 
 - Predict arrival delay as a continuous value in minutes.
-- Build useful schedule, route, time, and historical-delay features.
+- Build useful schedule, route, and time features derived only from a single flight's own request data.
 - Avoid using future flight information when creating previous-flight features.
 - Evaluate performance with RMSE, MAE, and R2.
 - Track experiments and model artifacts locally with MLflow.
@@ -20,20 +20,19 @@ Implemented:
 - Data cleaning and target filtering
 - Feature engineering
 - Chronological train/test splitting
-- Numerical median imputation
+- Numerical constant (zero) imputation
 - Sparse one-hot encoding for categorical variables
 - LightGBM regression training
 - Feature importance export
 - MLflow experiment tracking
 - Best-run registration script
-- Unit tests for preprocessing and target encoding
+- Unit tests for preprocessing, target encoding, feature engineering, and the API
+- A FastAPI prediction service (`src/api/`) that loads the trained MLflow pipeline and serves `/`, `/health`, `/model`, and `/predict`
+- A Dockerfile for the API
 
 Not currently implemented in this checkout:
 
-- FastAPI prediction service
-- Docker configuration
 - A pinned `requirements.txt`
-- A complete persisted preprocessing-plus-model inference pipeline
 
 ## Machine Learning Workflow
 
@@ -46,7 +45,7 @@ The main entry point is `src/models/train.py`. The workflow is:
 5. Remove rows with missing `ARR_DELAY`.
 6. Remove `ARR_DELAY` outliers using the 1.5 IQR rule.
 7. Optionally sample a fixed number of cleaned rows.
-8. Create date, time, route, cyclical, and historical-delay features.
+8. Create date, time, route, and cyclical features from each flight's own scheduled request data.
 9. Sort the data chronologically and split the earliest 80% for training and the latest 20% for testing.
 10. Fit the preprocessing transformer on training data only.
 11. Transform training and test data into the same sparse feature space.
@@ -141,7 +140,7 @@ DEST
 DISTANCE
 ARR_TIME
 DEP_TIME
-TAIL_NUM
+
 ```
 
 `ARR_DELAY` is the regression target. `FL_DATE` must be parseable as a date. Scheduled departure and arrival times are expected in values such as `1430`, representing 2:30 PM. Aircraft and actual-flight columns are used to create previous-flight features and are removed afterward when no longer needed.
@@ -202,23 +201,9 @@ Repeating time values are represented with sine and cosine transformations:
 - `route`, created from `ORIGIN` and `DEST`
 - `carrier_origin`, created from carrier and origin
 
-### Historical Delay Features
+### No Historical or Rolling Features
 
-Historical and recent delay features are calculated using earlier records in chronological order:
-
-- `carrier_historical_delay`
-- `carrier_recent_delay_7`
-- `carrier_recent_delay_30`
-- `route_historical_delay`
-- `route_recent_delay_7`
-- `route_recent_delay_30`
-- `origin_historical_delay`
-- `origin_recent_delay_7`
-- `origin_recent_delay_30`
-- `carrier_origin_historical_delay`
-- `aircraft_previous_delay`
-
-The feature builder uses shifted values and previous-flight logic for rolling and aircraft features. The first record in a group naturally receives a missing historical value; numerical median imputation handles these missing values before training.
+`build_features()` derives every feature above from a single flight's own request fields (`FL_DATE`, `CRS_DEP_TIME`, `CRS_ARR_TIME`, `CRS_ELAPSED_TIME`, `DISTANCE`, `OP_UNIQUE_CARRIER`, `ORIGIN`, `DEST`). It does not look up prior flights, rolling windows, or group statistics, and it takes no `history` DataFrame at prediction time. Earlier iterations of this project computed carrier/route/origin/aircraft historical-delay features (`carrier_historical_delay`, `carrier_recent_delay_7`/`_30`, `route_historical_delay`, `route_recent_delay_7`/`_30`, `origin_historical_delay`, `origin_recent_delay_7`/`_30`, `carrier_origin_historical_delay`, `aircraft_previous_delay`); those were removed and the model was retrained without them so the API never needs data the client can't provide.
 
 ## Preprocessing
 
@@ -233,36 +218,28 @@ CRS_ELAPSED_TIME
 DISTANCE
 year
 month
+quarter
 day
 day_of_week
 week_of_year
 is_weekend
 departure_hour
 departure_minute
+departure_time_minutes
+arrival_hour
+arrival_minute
+arrival_time_minutes
 departure_hour_sin
 departure_hour_cos
 day_of_week_sin
 day_of_week_cos
 month_sin
 month_cos
-arrival_hour
-arrival_minute
 distance_log
 is_peak_departure
-carrier_historical_delay
-route_historical_delay
-origin_historical_delay
-origin_recent_delay_7
-origin_recent_delay_30
-carrier_recent_delay_7
-carrier_recent_delay_30
-route_recent_delay_7
-route_recent_delay_30
-carrier_origin_historical_delay
-aircraft_previous_delay
 ```
 
-Numerical values are processed by `SimpleImputer(strategy="median")`.
+Numerical values are processed by `SimpleImputer(strategy="constant", fill_value=0)`.
 
 ### Categorical Features
 
@@ -433,7 +410,6 @@ Some executable values are currently defined directly in `src/models/train.py`, 
 5. Add end-to-end tests covering raw input through prediction.
 6. Add explicit checks for missing input columns and invalid time values.
 7. Add a deployment interface, such as FastAPI, only after the inference pipeline is persisted and tested.
-8. Review historical feature generation carefully whenever the time split or production prediction horizon changes.
 
 ## License
 

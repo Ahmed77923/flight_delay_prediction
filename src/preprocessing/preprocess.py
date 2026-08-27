@@ -25,7 +25,8 @@ def build_preprocessor() -> ColumnTransformer:
             (
                 "imputer",
                 SimpleImputer(
-                    strategy="median"
+                    strategy="constant",
+                    fill_value=0,
                 ),
             )
         ]
@@ -130,7 +131,7 @@ if __name__ == "__main__":
 
     test_features = build_features(
         test_df,
-        history=train_df,
+        history=None,
     )
 
     # ======================================================

@@ -9,11 +9,11 @@ def test_build_preprocessor_includes_onehot_encoding() -> None:
     preprocessor = build_preprocessor()
     names = [name for name, _, _ in preprocessor.transformers]
 
-    assert "onehot" in names
+    assert "categorical" in names
     onehot = dict(
         (name, transformer)
         for name, transformer, _ in preprocessor.transformers
-    )["onehot"]
+    )["categorical"]
     assert isinstance(onehot, OneHotEncoder)
     assert onehot.handle_unknown == "ignore"
 

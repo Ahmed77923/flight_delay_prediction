@@ -182,10 +182,10 @@ def prepare_data(
 
     # Test features
     # IMPORTANT:
-    # Train is used as historical context.
+    # Train is used as  context.
     test_features = build_features(
         test_df,
-        history=None,  # train_features,   # iam not using historical features for now
+        history=None,  # train_features,   # iam not using  features for now
     )
 
     print(
@@ -979,23 +979,6 @@ def run_training(
         ].to_string(index=False)
     )
 
-    # ========================================================
-    # 6. SAVE RESULTS
-    # ========================================================
-
-    results_path = (
-        "model_comparison_results_one_Hot.csv"
-    )
-
-    results_df.to_csv(
-        results_path,
-        index=False,
-    )
-
-    print(
-        f"\nComparison saved to: "
-        f"{results_path}"
-    )
 
     # ========================================================
     # 7. COMPLETION

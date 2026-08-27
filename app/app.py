@@ -1,20 +1,235 @@
+from datetime import datetime
 from pathlib import Path
 import sys
-from typing import Any, List
+from typing import Any, Dict, Optional
 
-import joblib
-import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MODEL_PATH = PROJECT_ROOT / "models" / "flight_delay_model.joblib"
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.features.build_feature import build_features
+from config.config import Config
 
+
+# ============================================================
+# API CONFIGURATION
+#
+# The Streamlit UI is a thin HTTP client. It never loads the MLflow
+# model and never runs feature engineering or inference itself -
+# FastAPI (src/api/main.py) remains the only component responsible
+# for that. Configure the API's base URL via the API_URL environment
+# variable (see config/config.py -> Config.API.BASE_URL); it defaults
+# to http://127.0.0.1:8000.
+# ============================================================
+
+API_URL = Config.API.BASE_URL.rstrip("/")
+PREDICT_ENDPOINT = f"{API_URL}/predict"
+HEALTH_ENDPOINT = f"{API_URL}/health"
+MODEL_INFO_ENDPOINT = f"{API_URL}/model"
+
+REQUEST_TIMEOUT_SECONDS = 10
+HEALTH_CHECK_TIMEOUT_SECONDS = 3
+HEALTH_CACHE_TTL_SECONDS = 15
+
+# Static option lists for the carrier / airport selectors. These used to
+# be read from the fitted OneHotEncoder inside the locally loaded model;
+# since the UI no longer loads the model, they are now a fixed reference
+# list of common IATA codes. The API accepts any string for these fields
+# and applies OneHotEncoder(handle_unknown="ignore") server-side, so an
+# unlisted code is still handled gracefully rather than crashing.
+CARRIER_OPTIONS = [
+    "AA", "AS", "B6", "DL", "F9", "G4", "HA", "NK", "UA", "WN",
+]
+
+AIRPORT_OPTIONS = [
+    "ATL", "AUS", "BNA", "BOS", "BWI", "CLT", "DCA", "DEN", "DFW", "DTW",
+    "EWR", "FLL", "IAD", "IAH", "JFK", "LAS", "LAX", "LGA", "MCO", "MDW",
+    "MIA", "MSP", "ORD", "PHL", "PHX", "SAN", "SEA", "SFO", "SLC", "TPA",
+]
+
+# ============================================================
+# API CLIENT
+# ============================================================
+
+class PredictionAPIError(Exception):
+    """Raised when the FastAPI prediction service can't fulfil a request."""
+
+
+def _extract_detail(response: requests.Response) -> str:
+    """
+    Turn FastAPI's error body into a short, readable string instead of
+    dumping the raw JSON/traceback-shaped structure at the user.
+    """
+
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+
+    detail = body.get("detail") if isinstance(body, dict) else None
+
+    if isinstance(detail, str):
+        return detail
+
+    if isinstance(detail, list):
+        # FastAPI/pydantic validation error shape:
+        # [{"loc": ["body", "ORIGIN"], "msg": "Field required", ...}, ...]
+        messages = []
+        for error in detail:
+            if not isinstance(error, dict):
+                continue
+            location = error.get("loc", [])
+            field = str(location[-1]) if location else "input"
+            message = error.get("msg", "invalid value")
+            messages.append(f"{field}: {message}")
+        return "; ".join(messages)
+
+    if isinstance(detail, dict):
+        error_text = detail.get("error")
+        if isinstance(error_text, str):
+            return error_text
+
+    return ""
+
+
+def call_predict_api(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Send a flight request to FastAPI's POST /predict and return the
+    parsed JSON response. Raises PredictionAPIError with a
+    user-friendly message on any failure - never lets a raw exception
+    or traceback reach the UI.
+    """
+
+    try:
+        response = requests.post(
+            PREDICT_ENDPOINT,
+            json=payload,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise PredictionAPIError(
+            f"Cannot connect to prediction API at {API_URL}. "
+            "Make sure the FastAPI service is running."
+        ) from exc
+    except requests.exceptions.Timeout as exc:
+        raise PredictionAPIError(
+            "The prediction service took too long to respond. Please try again."
+        ) from exc
+    except requests.exceptions.RequestException as exc:
+        raise PredictionAPIError(
+            "Cannot reach the prediction API."
+        ) from exc
+
+    if response.status_code == 422:
+        detail = _extract_detail(response)
+        raise PredictionAPIError(
+            "Invalid flight data." + (f" {detail}" if detail else "")
+        )
+
+    if 400 <= response.status_code < 500:
+        detail = _extract_detail(response)
+        raise PredictionAPIError(
+            "The prediction API rejected the request."
+            + (f" {detail}" if detail else "")
+        )
+
+    if response.status_code >= 500:
+        raise PredictionAPIError(
+            "Prediction service returned an error. Please try again later."
+        )
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise PredictionAPIError(
+            "Received an invalid response from the prediction service."
+        ) from exc
+
+    if not isinstance(data, dict) or "prediction" not in data:
+        raise PredictionAPIError(
+            "Received an unexpected response from the prediction service."
+        )
+
+    return data
+
+
+@st.cache_data(ttl=HEALTH_CACHE_TTL_SECONDS, show_spinner=False)
+def check_api_health() -> Dict[str, Any]:
+    """
+    Lightweight, cached GET /health check used only to render the
+    sidebar status - cached so it isn't re-fetched on every rerun.
+    """
+
+    try:
+        response = requests.get(
+            HEALTH_ENDPOINT,
+            timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException:
+        return {"status": "unreachable", "model_loaded": False}
+
+
+@st.cache_data(ttl=HEALTH_CACHE_TTL_SECONDS, show_spinner=False)
+def fetch_model_info() -> Optional[Dict[str, Any]]:
+    """Cached GET /model, used only to populate the informational expander."""
+
+    try:
+        response = requests.get(
+            MODEL_INFO_ENDPOINT,
+            timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException:
+        return None
+
+
+# ============================================================
+# REQUEST PAYLOAD
+# ============================================================
+
+def build_predict_payload(
+    carrier: str,
+    origin: str,
+    destination: str,
+    flight_date: Any,
+    departure_hour: int,
+    departure_minute: int,
+    arrival_hour: int,
+    arrival_minute: int,
+    distance: float,
+    elapsed_time: float,
+) -> Dict[str, Any]:
+    """
+    Map the Streamlit form fields onto the exact FastAPI FlightRequest
+    field names. No feature engineering happens here - that is entirely
+    FastAPI's / build_features()'s responsibility.
+    """
+
+    return {
+        "FL_DATE": datetime.combine(
+            flight_date,
+            datetime.min.time(),
+        ).isoformat(),
+        "CRS_DEP_TIME": departure_hour * 100 + departure_minute,
+        "CRS_ARR_TIME": arrival_hour * 100 + arrival_minute,
+        "CRS_ELAPSED_TIME": elapsed_time,
+        "DISTANCE": distance,
+        "OP_UNIQUE_CARRIER": carrier,
+        "ORIGIN": origin,
+        "DEST": destination,
+    }
+
+
+# ============================================================
+# PAGE
+# ============================================================
 
 st.set_page_config(
     page_title="Flight Delay Prediction",
@@ -42,125 +257,45 @@ st.markdown(
 )
 
 
-@st.cache_resource
-def load_model() -> Any:
-    return joblib.load(MODEL_PATH)
-
-
-def get_encoder_categories(model: Any, column: str) -> List[str]:
-    preprocessor = model.named_steps["preprocessor"]
-    for name, transformer, columns in preprocessor.transformers:
-        if name == "onehot":
-            fitted_encoder = preprocessor.named_transformers_[name]
-            category_columns = dict(
-                zip(columns, fitted_encoder.categories_)
-            )
-            return [str(value) for value in category_columns[column]]
-    raise KeyError("The saved model does not contain a one-hot transformer.")
-
-
-def build_inference_frame(
-    carrier: str,
-    origin: str,
-    destination: str,
-    flight_date: Any,
-    departure_hour: int,
-    departure_minute: int,
-    arrival_hour: int,
-    arrival_minute: int,
-    distance: float,
-    elapsed_time: float,
-) -> pd.DataFrame:
-    departure_code = departure_hour * 100 + departure_minute
-    arrival_code = arrival_hour * 100 + arrival_minute
-
-    raw_input = pd.DataFrame(
-        [
-            {
-                "ARR_DELAY": np.nan,
-                "CANCELLED": 0,
-                "DIVERTED": 0,
-                "CRS_ELAPSED_TIME": elapsed_time,
-                "FL_DATE": pd.Timestamp(flight_date),
-                "CRS_DEP_TIME": departure_code,
-                "CRS_ARR_TIME": arrival_code,
-                "OP_UNIQUE_CARRIER": carrier,
-                "ORIGIN": origin,
-                "DEST": destination,
-                "DISTANCE": distance,
-                "ARR_TIME": arrival_code,
-                "DEP_TIME": departure_code,
-                "TAIL_NUM": "INFERENCE",
-            }
-        ]
-    )
-
-    features = build_features(raw_input)
-
-    # These values require prior observed flights and are unavailable for one flight.
-    historical_columns = [
-        "carrier_historical_delay",
-        "route_historical_delay",
-        "origin_historical_delay",
-        "origin_recent_delay_7",
-        "origin_recent_delay_30",
-        "carrier_recent_delay_7",
-        "carrier_recent_delay_30",
-        "route_recent_delay_7",
-        "route_recent_delay_30",
-        "carrier_origin_historical_delay",
-        "aircraft_previous_delay",
-    ]
-    features[historical_columns] = np.nan
-
-    return features.drop(columns=["ARR_DELAY", "FL_DATE"])
-
-
-try:
-    model = load_model()
-    model_type = type(model.named_steps["model"]).__name__
-except Exception:
-    model = None
-    model_type = "Unavailable"
-
-
 with st.sidebar:
-    st.subheader("Model")
-    if model is not None:
-        st.success("Model Loaded")
-        st.write(f"**Model type:** {model_type}")
+    st.subheader("Prediction API")
+
+    health = check_api_health()
+
+    if health.get("status") == "healthy" and health.get("model_loaded"):
+        st.success("API Connected")
+        st.write(f"**Model type:** {health.get('model_type', 'unknown')}")
         st.write("**Status:** Ready for Prediction")
     else:
-        st.error("Model unavailable")
-        st.write(f"Expected file: `{MODEL_PATH}`")
+        st.error("API unavailable")
+        st.write(f"Expected URL: `{API_URL}`")
+        st.caption(
+            "Start FastAPI with `uvicorn src.api.main:app` "
+            "and reload this page."
+        )
+
+    st.caption(f"Endpoint: `{PREDICT_ENDPOINT}`")
 
 
 st.markdown(
     """
     <div class="hero">
         <h1>Flight Delay Prediction</h1>
-        <p>Predict flight delay using a trained machine learning model.</p>
+        <p>Predict flight delay using the trained model served by the FastAPI prediction API.</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-if model is None:
-    st.stop()
-
-carrier_options = get_encoder_categories(model, "OP_UNIQUE_CARRIER")
-origin_options = get_encoder_categories(model, "ORIGIN")
-destination_options = get_encoder_categories(model, "DEST")
-
 st.subheader("Flight Information")
 with st.form("prediction_form"):
     carrier_col, origin_col, destination_col = st.columns(3)
     with carrier_col:
-        carrier = st.selectbox("Carrier", carrier_options)
+        carrier = st.selectbox("Carrier", CARRIER_OPTIONS)
     with origin_col:
-        origin = st.selectbox("Origin", origin_options)
+        origin = st.selectbox("Origin", AIRPORT_OPTIONS)
     with destination_col:
-        destination = st.selectbox("Destination", destination_options)
+        destination = st.selectbox("Destination", AIRPORT_OPTIONS, index=1)
 
     st.subheader("Schedule")
     date_col, departure_col, arrival_col = st.columns(3)
@@ -193,58 +328,73 @@ if submitted:
     elif origin == destination:
         st.error("Origin and destination must be different airports.")
     else:
+        payload = build_predict_payload(
+            carrier,
+            origin,
+            destination,
+            flight_date,
+            departure_hour,
+            departure_minute,
+            arrival_hour,
+            arrival_minute,
+            distance,
+            elapsed_time,
+        )
+
         try:
-            input_frame = build_inference_frame(
-                carrier,
-                origin,
-                destination,
-                flight_date,
-                departure_hour,
-                departure_minute,
-                arrival_hour,
-                arrival_minute,
-                distance,
-                elapsed_time,
-            )
-            prediction = float(model.predict(input_frame)[0])
+            with st.spinner("Contacting prediction API..."):
+                result = call_predict_api(payload)
+
+            prediction = float(result["prediction"])
+
             st.markdown(
                 f"""
                 <div class="result">
-                    <div class="result-label">Predicted Flight Delay</div>
-                    <div class="result-value">{prediction:.1f} minutes</div>
+                    <div class="result-label">Predicted Arrival Delay</div>
+                    <div class="result-value">{prediction:.2f} minutes</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-        except (KeyError, ValueError, TypeError) as exc:
-            st.error(f"Unable to make a prediction from these inputs: {exc}")
+
+            if prediction <= 0:
+                st.caption("A negative value means the flight is predicted to arrive early.")
+
+        except PredictionAPIError as exc:
+            st.error(str(exc))
 
 with st.expander("Model features"):
-    preprocessor = model.named_steps["preprocessor"]
-    numerical_features = next(
-        columns
-        for name, _, columns in preprocessor.transformers
-        if name == "numerical"
-    )
-    categorical_features = next(
-        columns
-        for name, _, columns in preprocessor.transformers
-        if name == "onehot"
-    )
+    model_info = fetch_model_info()
 
-    feature_col, categorical_col = st.columns(2)
-    with feature_col:
-        st.markdown("**Numerical features**")
-        st.code("\n".join(str(feature) for feature in numerical_features))
-    with categorical_col:
-        st.markdown("**Categorical features**")
-        st.code("\n".join(str(feature) for feature in categorical_features))
+    if model_info is None:
+        st.info("Model information is unavailable - the prediction API could not be reached.")
+    else:
+        expected_columns = model_info.get("expected_columns", [])
+        categorical = [c for c in expected_columns if c in {
+            "OP_UNIQUE_CARRIER", "ORIGIN", "DEST", "route",
+            "departure_period", "carrier_origin",
+        }]
+        numerical = [c for c in expected_columns if c not in categorical]
+
+        feature_col, categorical_col = st.columns(2)
+        with feature_col:
+            st.markdown("**Numerical features**")
+            st.code("\n".join(str(f) for f in numerical) or "unavailable")
+        with categorical_col:
+            st.markdown("**Categorical features**")
+            st.code("\n".join(str(f) for f in categorical) or "unavailable")
+
+        st.caption(
+            f"Model type: {model_info.get('model_type', 'unknown')} | "
+            f"Historical features used: {model_info.get('historical_features_used', 'unknown')}"
+        )
 
 with st.expander("About this prediction"):
     st.write(
-        "The saved preprocessing and LightGBM model are used directly. "
-        "Derived date, schedule, route, cyclical, distance, and peak features "
-        "reuse the project's existing feature-engineering function. Historical "
-        "delay features require prior observed flights, so they are left missing "
-        "and handled by the saved numerical imputer."
+        "This page is a thin client: it sends your flight details as JSON to the "
+        f"FastAPI prediction service (`POST {PREDICT_ENDPOINT}`), which builds the "
+        "model's input features and runs the trained MLflow pipeline. No model is "
+        "loaded and no prediction happens inside this Streamlit app. "
+        "The model only uses information available at request time - it does not "
+        "look up historical or prior-flight delay statistics."
     )
