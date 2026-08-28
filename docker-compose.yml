@@ -2,30 +2,56 @@ services:
   api:
     build: .
     image: flight-delay-prediction:latest
+
     ports:
-      - "8000:8000"
+      - "1041:8000"
+
     environment:
       API_HOST: 0.0.0.0
       API_PORT: 8000
+
+      MLFLOW_MODEL_URI: /app/mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts
+
+    volumes:
+      - ./mlruns:/app/mlruns:ro
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
+
     restart: unless-stopped
 
   streamlit:
     build: .
     image: flight-delay-prediction:latest
-    command: ["streamlit", "run", "app/app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+
+    command:
+      [
+        "streamlit",
+        "run",
+        "app/app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=1040",
+        "--server.headless=true"
+      ]
+
     ports:
-      - "8501:8501"
+      - "1043:1040"
+
     environment:
-      # Container-to-container hop: the Streamlit service reaches FastAPI
-      # by its Compose service name, not localhost.
       API_URL: http://api:8000
+
     depends_on:
       api:
         condition: service_healthy
+
     restart: unless-stopped

@@ -8,10 +8,6 @@ __pycache__/
 venv/
 env/
 
-# MLflow
-mlruns/
-mlflow.db
-
 # Models
 models/*.joblib
 models/*.pkl

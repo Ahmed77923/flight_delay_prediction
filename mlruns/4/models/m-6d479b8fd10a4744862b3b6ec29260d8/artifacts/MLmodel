@@ -1,0 +1,27 @@
+artifact_path: file:///C:/Users/PC/Desktop/Machine_Learning/Flight_Delay_Prediction/mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.skops
+    predict_fn: predict
+    python_version: 3.11.9
+  sklearn:
+    code: null
+    pickled_model: model.skops
+    serialization_format: skops
+    sklearn_version: 1.9.0
+    skops_trusted_types:
+    - collections.OrderedDict
+    - lightgbm.basic.Booster
+    - lightgbm.sklearn.LGBMRegressor
+    - numpy.dtype
+mlflow_version: 3.15.1
+model_id: m-6d479b8fd10a4744862b3b6ec29260d8
+model_size_bytes: 10525697
+model_uuid: m-6d479b8fd10a4744862b3b6ec29260d8
+prompts: null
+run_id: 5407198a78d545f4a3d1ded962e0ed07
+utc_time_created: '2026-08-26 22:56:20.545970'
