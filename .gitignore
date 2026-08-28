@@ -12,7 +12,7 @@ env/
 models/*.joblib
 models/*.pkl
 models/*.onnx
-
+mlflow.db
 # Data
 data/
 *.csv
