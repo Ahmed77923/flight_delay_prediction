@@ -499,10 +499,7 @@ def get_models() -> Dict[str, Dict[str, Any]]:
 # ============================================================
 # METRICS
 # ============================================================
-def calculate_metrics(
-    y_true: Any,
-    predictions: Any,
-) -> Dict[str, float]:
+def calculate_metrics(y_true: Any,predictions: Any,) -> Dict[str, float]:
 
     rmse = np.sqrt(
         mean_squared_error(
@@ -615,11 +612,7 @@ def get_feature_importance(
 # LOG PARAMETERS
 # ============================================================
 
-def log_parameters(
-    model: Any,
-    X_train: Any,
-    X_test: Any,
-) -> None:
+def log_parameters(model: Any,X_train: Any,X_test: Any,) -> None:
 
     params = {
         "random_state": Config.MODEL.RANDOM_STATE,

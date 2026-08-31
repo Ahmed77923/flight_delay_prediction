@@ -17,7 +17,8 @@ from config.config import Config
 
 # ============================================================
 # API CONFIGURATION
-#
+# ============================================================
+
 # The Streamlit UI is a thin HTTP client. It never loads the MLflow
 # model and never runs feature engineering or inference itself -
 # FastAPI (src/api/main.py) remains the only component responsible
