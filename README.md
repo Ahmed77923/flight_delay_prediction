@@ -1,502 +1,467 @@
 # Flight Delay Prediction
 
-An end-to-end machine learning project for predicting a flight's arrival delay in minutes. The prediction target is `ARR_DELAY`. The project combines flight schedule information, route and carrier attributes, calendar features, and cyclical time features. Historical/rolling delay statistics were explored but are **not** used by the current model, so a prediction can be made from a single flight request with no lookup into past flights.
+## Project Overview
 
-The current training pipeline uses a LightGBM regression model with constant (zero) imputation for numerical columns and sparse one-hot encoding for categorical columns. Training runs and metrics are tracked with MLflow.
+Flight Delay Prediction is a machine-learning system that estimates a flight's arrival delay in minutes using information available before departure. The project covers data loading and cleaning, feature engineering, model training and evaluation, MLflow artifact tracking, model loading, a FastAPI prediction service, and a Streamlit user interface.
 
-## Project Goals
+This implementation is a supervised **regression** problem, not a delayed/not-delayed classification problem. The target is the continuous `ARR_DELAY` value. The API returns a numeric prediction in minutes and does not currently return a probability or confidence score.
 
-- Predict arrival delay as a continuous value in minutes.
-- Build useful schedule, route, and time features derived only from a single flight's own request data.
-- Avoid using future flight information when creating previous-flight features.
-- Evaluate performance with RMSE, MAE, and R2.
-- Track experiments and model artifacts locally with MLflow.
+```text
+Historical flight data
+  -> Data cleaning
+  -> Feature engineering
+  -> Chronological train/test split
+  -> Preprocessing
+  -> LightGBM regression model
+  -> Evaluation and MLflow logging
+  -> Loaded model pipeline
+  -> FastAPI prediction API
+  -> Streamlit interface
+```
 
-## Current Status
+## Main Objective
 
-Implemented:
+The project is intended to provide an end-to-end flight-delay prediction workflow that can:
 
-- Monthly CSV loading and concatenation
-- Data cleaning and target filtering
-- Feature engineering
-- Chronological train/test splitting
-- Numerical constant (zero) imputation
-- Sparse one-hot encoding for categorical variables
-- LightGBM regression training
-- Feature importance export
-- MLflow experiment tracking
-- Best-run registration script
-- Unit tests for preprocessing, target encoding, feature engineering, and the API
-- A FastAPI prediction service (`src/api/`) that loads the trained MLflow pipeline and serves `/`, `/health`, `/model`, and `/predict`
-- A Dockerfile for the API
+- process historical monthly flight CSV files;
+- prepare date, time, route, carrier, and distance features;
+- train and evaluate a LightGBM regression model;
+- track training runs and model artifacts with MLflow;
+- load a selected local model artifact for inference;
+- expose predictions through FastAPI; and
+- provide a browser-based Streamlit client.
 
-Not currently implemented in this checkout:
+Monitoring services, authentication, model registry promotion workflows, and future-date mapping are not implemented in the current checkout.
 
-- A pinned `requirements.txt`
+The model uses information available for one flight request: scheduled date and times, carrier, airports, scheduled duration, and distance. It does not query historical flights or use previous-flight delay statistics at inference time.
 
-## Machine Learning Workflow
+The current model uses information available for one flight request: scheduled date and times, carrier, airports, scheduled duration, and distance. It does not query historical flights or use previous-flight delay statistics at inference time.
 
-The main entry point is `src/models/train.py`. The workflow is:
+## Quick Start
 
-1. Load every CSV file in `data/`.
-2. Concatenate the monthly files into one DataFrame.
-3. Remove cancelled and diverted flights.
-4. Remove rows with invalid `CRS_ELAPSED_TIME` values.
-5. Remove rows with missing `ARR_DELAY`.
-6. Remove `ARR_DELAY` outliers using the 1.5 IQR rule.
-7. Optionally sample a fixed number of cleaned rows.
-8. Create date, time, route, and cyclical features from each flight's own scheduled request data.
-9. Sort the data chronologically and split the earliest 80% for training and the latest 20% for testing.
-10. Fit the preprocessing transformer on training data only.
-11. Transform training and test data into the same sparse feature space.
-12. Train the LightGBM regressor.
-13. Calculate training and test RMSE, MAE, and R2.
-14. Save feature importance and model-comparison CSV files.
-15. Log parameters, metrics, tags, and the model artifact to MLflow.
+From the repository root on Windows PowerShell:
 
-The split is chronological, not random. This approximates training on earlier flights and evaluating on later flights.
+```powershell
+
+python -m pip install -r requirements.txt
+uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, activate the same environment and start the UI:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+streamlit run app/app.py
+```
+
+Open `http://127.0.0.1:8501` for Streamlit or `http://127.0.0.1:8000/docs` for FastAPI. The API loads the committed model artifact at startup.
+
+For the containerized application:
+
+```powershell
+docker compose up --build
+```
+
+Then open `http://127.0.0.1:1043` for Streamlit and `http://127.0.0.1:1041/docs` for FastAPI.
+
+## Contents
+
+- [Architecture](#architecture)
+- [Repository Structure](#repository-structure)
+- [Requirements and Installation](#requirements-and-installation)
+- [Configuration](#configuration)
+- [Running Locally](#running-locally)
+- [Machine-Learning Pipeline](#machine-learning-pipeline)
+- [API](#api)
+- [Streamlit Application](#streamlit-application)
+- [Docker](#docker)
+- [MLflow](#mlflow)
+- [Testing](#testing)
+- [Development Guide](#development-guide)
+- [Troubleshooting](#troubleshooting)
+- [Limitations and Security](#limitations-and-security)
+- [Repository State](#repository-state)
+
+## Architecture
+
+### Training flow
+
+```text
+data/month_*.csv
+    -> load_data()
+    -> clean_data()
+    -> chronological 80/20 split
+    -> build_features()
+    -> zero-imputation + sparse one-hot encoding
+    -> LightGBM regression pipeline
+    -> RMSE, MAE, and R2 evaluation
+    -> MLflow run, feature-importance artifact, and model artifact
+```
+
+### Inference flow
+
+```text
+FlightRequest JSON
+    -> FastAPI POST /predict
+    -> pandas DataFrame
+    -> build_features()
+    -> select fitted preprocessor input columns
+    -> loaded MLflow sklearn Pipeline
+    -> PredictionResponse
+```
+
+Streamlit is a thin HTTP client. It sends requests to FastAPI and does not load the model or perform feature engineering itself.
+
+There is no Prometheus, Grafana, Kubernetes, Helm, Terraform, CI/CD, database application layer, or authentication implementation in this repository. MLflow is used for tracking and model artifacts; the API serves the local artifact directly.
 
 ## Repository Structure
 
 ```text
 .
+├── app/
+│   └── app.py                         Streamlit client application
 ├── config/
-│   └── config.py                 Shared project configuration
+│   └── config.py                      Shared configuration classes
 ├── data/
-│   ├── month_1.csv               Monthly input data
-│   ├── month_2.csv
-│   └── ...
-├── models/                       Saved or exported model files
-├── mlruns/                       Local MLflow tracking store
+│   ├── month_1.csv ... month_12.csv   Input monthly CSV data
+├── mlruns/
+│   └── 4/                             Local MLflow experiment and model artifact
 ├── notebook/
-│   ├── note1.ipynb               Exploratory work
-│   └── note2.ipynb
+│   ├── note1.ipynb                    Notebook analysis
+│   └── note2.ipynb                    Notebook analysis
 ├── src/
+│   ├── api/
+│   │   ├── main.py                    FastAPI application and endpoints
+│   │   ├── model_loader.py             MLflow pipeline loading and state
+│   │   └── schemas.py                  Pydantic request/response schemas
 │   ├── data/
-│   │   ├── load.py               CSV loading
-│   │   └── clean_data.py         Data cleaning
+│   │   ├── load.py                     CSV loading and concatenation
+│   │   ├── clean_data.py               Training-data filtering
+│   │   └── split_data.py               Chronological train/test split
 │   ├── features/
-│   │   └── build_feature.py      Feature engineering
+│   │   └── build_feature.py            Feature engineering
 │   ├── models/
-│   │   ├── train.py              Training and evaluation
-│   │   └── register.py           MLflow model registration
+│   │   └── train.py                    Model training and MLflow logging
 │   └── preprocessing/
-│       ├── preprocess.py         Splitting and one-hot preprocessing
-│       └── target_encoder.py     Standalone target-encoder implementation
+│       ├── preprocess.py               Imputation and one-hot preprocessing
+│       └── target_encoder.py            Separately tested custom encoder
 ├── tests/
-│   └── test_target_encoding.py   Preprocessing and target-encoder tests
-├── feature_importance_lightgbm.csv
-├── model_comparison_results.csv
-└── README.md
+│   ├── test_api.py                     FastAPI endpoint tests
+│   ├── test_build_features.py           Feature engineering tests
+│   └── test_target_encoding.py          Target-encoder tests
+├── .dockerignore                       Docker build exclusions
+├── .env                                Local environment values; do not commit secrets
+├── .gitignore                          Git exclusions
+├── docker-compose.yml                  API and Streamlit services
+├── Dockerfile                          Python image and API startup
+├── mlflow.db                           Local MLflow backend database
+├── requirements.txt                    Pinned Python dependencies
+└── README.md                           Project documentation
 ```
 
-The `mlruns/` directory can contain many generated run artifacts and may be large.
+`models/` is referenced by configuration but is not present in this checkout. Generated CSV files and ordinary local model files are ignored by Git. The committed `mlruns/` content includes the model used by the API.
 
-## Requirements
+## Requirements and Installation
 
-Use Python 3.9 or newer. The project uses:
+The Dockerfile uses `python:3.11-slim`; the committed model metadata was created with Python `3.11.9`. Use Python 3.11 for the closest match.
 
-- Python
-- pandas
-- NumPy
-- scikit-learn
-- LightGBM
-- MLflow
-- SciPy
-- pytest
+The project has no Node.js, GPU/CUDA, database-server, or operating-system dependency for local Python execution. Docker installs Linux `libgomp1`, required by LightGBM in the container.
 
-XGBoost is present in the historical dependency list, but the current `get_models()` implementation trains LightGBM only.
-
-## Installation
-
-Run these commands from the project root:
+Install the exact pinned dependencies with:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install pandas numpy scikit-learn lightgbm mlflow scipy pytest
+python -m pip install -r requirements.txt
 ```
 
-If PowerShell prevents virtual-environment activation, use the Python executable inside `.venv\Scripts\python.exe` directly or activate the environment using the shell appropriate for your system.
+`requirements.txt` pins Streamlit, pandas, NumPy, scikit-learn, LightGBM, SciPy, MLflow, pytest, FastAPI, Uvicorn, python-dotenv, httpx, requests, and skops.
 
-## Input Data
+## Configuration
 
-Place monthly CSV files directly inside `data/`. The loader searches for files matching `data/*.csv`, sorts them by filename, reads them with pandas, and concatenates them.
+Configuration is loaded by `config/config.py` with `python-dotenv`.
 
-The raw files should contain at least these columns:
+| Variable              | Required | Default in code                                                | Purpose                                                       |
+| --------------------- | -------: | -------------------------------------------------------------- | ------------------------------------------------------------- |
+| `MLFLOW_TRACKING_URI` |       No | `http://127.0.0.1:5000`                                        | MLflow tracking URI used by training and model loading        |
+| `MLFLOW_MODEL_URI`    |       No | `mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts` | Model artifact loaded by the API                              |
+| `API_HOST`            |       No | `0.0.0.0` in Docker configuration                              | API bind host                                                 |
+| `API_PORT`            |       No | `8000`                                                         | API listening port                                            |
+| `API_URL`             |       No | `http://127.0.0.1:8000`                                        | URL used by Streamlit to reach FastAPI                        |
+| `TRAINING_YEAR`       |       No | `2025`                                                         | Defined in configuration; not used by the active trainer flow |
+| `LOG_LEVEL`           |       No | Not consumed by application code                               | Present in local `.env`, but no code reads it                 |
+
+The local `.env` contains machine-specific values and is not reproduced here. There is no `.env.example` file. A safe template is:
 
 ```text
-ARR_DELAY
-CANCELLED
-DIVERTED
-CRS_ELAPSED_TIME
-FL_DATE
-CRS_DEP_TIME
-CRS_ARR_TIME
-OP_UNIQUE_CARRIER
-ORIGIN
-DEST
-DISTANCE
-ARR_TIME
-DEP_TIME
-
+MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+MLFLOW_MODEL_URI=mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts
+API_HOST=127.0.0.1
+API_PORT=8000
+API_URL=http://127.0.0.1:8000
 ```
 
-`ARR_DELAY` is the regression target. `FL_DATE` must be parseable as a date. Scheduled departure and arrival times are expected in values such as `1430`, representing 2:30 PM. Aircraft and actual-flight columns are used to create previous-flight features and are removed afterward when no longer needed.
+## Running Locally
 
-## Data Cleaning
+### Start FastAPI
 
-`src/data/clean_data.py` applies these filters:
-
-- Keep only `CANCELLED == 0`.
-- Keep only `DIVERTED == 0`.
-- Keep rows where `CRS_ELAPSED_TIME >= 0`.
-- Drop rows where `ARR_DELAY` is missing.
-- Remove target outliers outside the 1.5 IQR range.
-
-The cleaning function prints the calculated first quartile, third quartile, IQR, and outlier bounds.
-
-## Feature Engineering
-
-Feature construction is implemented in `src/features/build_feature.py`.
-
-### Calendar Features
-
-- `year`
-- `month`
-- `quarter`
-- `day`
-- `day_of_week`
-- `week_of_year`
-- `is_weekend`
-
-### Schedule and Time Features
-
-- `departure_hour`
-- `departure_minute`
-- `arrival_hour`
-- `arrival_minute`
-- `departure_time_minutes`
-- `arrival_time_minutes`
-- `scheduled_departure`
-- `departure_period`
-- `is_peak_departure`
-
-### Cyclical Time Features
-
-Repeating time values are represented with sine and cosine transformations:
-
-- `departure_hour_sin`
-- `departure_hour_cos`
-- `day_of_week_sin`
-- `day_of_week_cos`
-- `month_sin`
-- `month_cos`
-
-### Route and Distance Features
-
-- `DISTANCE`
-- `distance_log`
-- `route`, created from `ORIGIN` and `DEST`
-- `carrier_origin`, created from carrier and origin
-
-### No Historical or Rolling Features
-
-`build_features()` derives every feature above from a single flight's own request fields (`FL_DATE`, `CRS_DEP_TIME`, `CRS_ARR_TIME`, `CRS_ELAPSED_TIME`, `DISTANCE`, `OP_UNIQUE_CARRIER`, `ORIGIN`, `DEST`). It does not look up prior flights, rolling windows, or group statistics, and it takes no `history` DataFrame at prediction time. Earlier iterations of this project computed carrier/route/origin/aircraft historical-delay features (`carrier_historical_delay`, `carrier_recent_delay_7`/`_30`, `route_historical_delay`, `route_recent_delay_7`/`_30`, `origin_historical_delay`, `origin_recent_delay_7`/`_30`, `carrier_origin_historical_delay`, `aircraft_previous_delay`); those were removed and the model was retrained without them so the API never needs data the client can't provide.
-
-## Preprocessing
-
-The active trainer uses `build_preprocessor()` from `src/preprocessing/preprocess.py`.
-
-### Numerical Features
-
-The configured numerical features are:
-
-```text
-CRS_ELAPSED_TIME
-DISTANCE
-year
-month
-quarter
-day
-day_of_week
-week_of_year
-is_weekend
-departure_hour
-departure_minute
-departure_time_minutes
-arrival_hour
-arrival_minute
-arrival_time_minutes
-departure_hour_sin
-departure_hour_cos
-day_of_week_sin
-day_of_week_cos
-month_sin
-month_cos
-distance_log
-is_peak_departure
+```powershell
+uvicorn src.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Numerical values are processed by `SimpleImputer(strategy="constant", fill_value=0)`.
+The application loads and validates the MLflow pipeline during startup. A missing or incompatible model prevents startup.
 
-### Categorical Features
+### Start Streamlit
 
-The configured categorical features are:
+With FastAPI running in another terminal:
 
-```text
-OP_UNIQUE_CARRIER
-ORIGIN
-DEST
-route
-departure_period
-carrier_origin
+```powershell
+streamlit run app/app.py
 ```
 
-They are processed by `OneHotEncoder(handle_unknown="ignore")`. Categories found in the test set that were not present during fitting do not cause a transformation error. The `ColumnTransformer` preserves sparse output, which is suitable for high-cardinality route and airport features.
+To point the UI at another API:
 
-The custom `TargetEncoder` remains in the repository as a separately tested transformer, but it is not used by the current training pipeline.
-
-## Model
-
-The current model is `lightgbm.LGBMRegressor` with these main settings:
-
-```text
-num_leaves=63
-max_depth=-1
-learning_rate=0.10
-n_estimators=1000
-min_child_samples=200
-reg_alpha=0.0
-reg_lambda=1.0
-colsample_bytree=1.0
-n_jobs=-1
-random_state=42
-verbosity=-1
+```powershell
+$env:API_URL = "http://127.0.0.1:9000"
+streamlit run app/app.py
 ```
 
-The model predicts a continuous arrival-delay value in minutes.
+### Train
 
-## Training
-
-Run the complete training workflow from the repository root:
+Training reads all `*.csv` files under `data/`, cleans them, performs a chronological split, builds features, trains LightGBM, evaluates it, and logs the run and model to MLflow:
 
 ```powershell
 python -m src.models.train
 ```
 
-To use a smaller sample for a faster experiment:
+For a smaller experiment:
 
 ```powershell
-python -m src.models.train --sample-size 1000000
+python -m src.models.train --sample-size 100000
 ```
 
-The sample size must be greater than zero. If it is smaller than the cleaned dataset, sampling uses random state `42`. The full dataset is used when `--sample-size` is omitted.
+The alias `--sample_size` is also accepted. A positive sample size is required. The active trainer defines one model, `lightgbm`, and always enables MLflow tracking.
 
-The script prints loading, cleaning, feature-engineering, split, preprocessing, validation, training, evaluation, and MLflow information to the terminal.
+### Inspect the model loader
 
-## Evaluation Metrics
+```powershell
+python -m src.api.model_loader
+```
 
-The trainer calculates:
+## Machine-Learning Pipeline
 
-- **RMSE**: Penalizes larger prediction errors more strongly.
-- **MAE**: Average absolute prediction error in minutes.
-- **R2**: Proportion of target variance explained by the model.
+### Dataset and cleaning
 
-Metrics are calculated separately for training and test data. Test metrics are the primary values for comparing model quality.
+`src.data.load.load_data()` reads and concatenates sorted CSV files matching `data/*.csv`. The checked-in dataset contains `month_1.csv` through `month_12.csv`.
 
-## Generated Outputs
+Training cleaning requires `CANCELLED`, `DIVERTED`, `CRS_ELAPSED_TIME`, and `ARR_DELAY`. It keeps non-cancelled, non-diverted flights with positive scheduled duration, drops missing targets, and removes `ARR_DELAY` values outside the 1.5 IQR bounds.
 
-Training can create or update:
+Feature construction additionally requires:
 
-- `model_comparison_results_one_Hot.csv`: Model metrics sorted by ascending test RMSE.
-- `feature_importance_<model_name>.csv`: Feature importance values and percentages.
-- `mlruns/`: MLflow experiments, metrics, parameters, tags, and model artifacts.
+```text
+FL_DATE, CRS_DEP_TIME, CRS_ARR_TIME, CRS_ELAPSED_TIME,
+DISTANCE, OP_UNIQUE_CARRIER, ORIGIN, DEST
+```
 
-Feature names include the `ColumnTransformer` prefixes and one-hot category names, for example `onehot__ORIGIN_JFK`.
+`FL_DATE` must be parseable as a date. Scheduled times are integer `HHMM` values, such as `800` or `1430`.
+
+### Split and features
+
+`split_data()` sorts by `FL_DATE` and assigns the earliest 80% to training and the latest 20% to testing. The preprocessor is fitted on training features and only transformed on test features.
+
+`build_features()` creates calendar features (`year`, `month`, `quarter`, `day`, `day_of_week`, `week_of_year`, `is_weekend`), schedule/time features, cyclical sine/cosine features, route and carrier-origin categories, `distance_log`, and `is_peak_departure`.
+
+The optional `history` parameter is accepted for compatibility but no historical statistics are calculated. The API calls `build_features()` with a single request.
+
+### Preprocessing and model
+
+Numerical columns use `SimpleImputer(strategy="constant", fill_value=0)`. Categorical columns use `OneHotEncoder(handle_unknown="ignore", sparse_output=True)`. The resulting `ColumnTransformer` preserves sparse output.
+
+The active model is `lightgbm.LGBMRegressor` with:
+
+```text
+num_leaves=63, max_depth=-1, learning_rate=0.10, n_estimators=1000,
+min_child_samples=200, reg_alpha=0.0, reg_lambda=1.0,
+colsample_bytree=1.0, n_jobs=-1, random_state=42, verbosity=-1
+```
+
+The fitted preprocessor and model are stored together in an sklearn `Pipeline`, then logged to MLflow using skops serialization. The checked-in artifact is model ID `m-6d479b8fd10a4744862b3b6ec29260d8`, from run `5407198a78d545f4a3d1ded962e0ed07`.
+
+Training calculates RMSE, MAE, and R2 for train and test predictions and logs feature importance as `feature_importance.csv` inside the MLflow run.
+
+## API
+
+The entry point is `src.api.main:app`. FastAPI loads the model once during application startup.
+
+| Method | Endpoint   | Description                                 |
+| ------ | ---------- | ------------------------------------------- |
+| `GET`  | `/`        | Service name, version, and endpoint list    |
+| `GET`  | `/health`  | Model-loaded health status                  |
+| `GET`  | `/model`   | Loaded pipeline and expected input metadata |
+| `POST` | `/predict` | Predict arrival delay                       |
+| `GET`  | `/docs`    | Interactive FastAPI documentation           |
+
+### Request
+
+`POST /predict` accepts exactly these JSON fields. Unknown fields, including `ARR_DELAY`, are rejected with HTTP 422.
+
+```json
+{
+  "FL_DATE": "2026-08-22",
+  "CRS_DEP_TIME": 800,
+  "CRS_ARR_TIME": 1100,
+  "CRS_ELAPSED_TIME": 180,
+  "DISTANCE": 2475,
+  "OP_UNIQUE_CARRIER": "AA",
+  "ORIGIN": "JFK",
+  "DEST": "LAX"
+}
+```
+
+`FL_DATE` is parsed by Pydantic as a datetime. Times must be valid `HHMM` values and distance must be non-negative.
+
+Example request:
+
+```powershell
+$body = @'
+{
+  "FL_DATE": "2026-08-22",
+  "CRS_DEP_TIME": 800,
+  "CRS_ARR_TIME": 1100,
+  "CRS_ELAPSED_TIME": 180,
+  "DISTANCE": 2475,
+  "OP_UNIQUE_CARRIER": "AA",
+  "ORIGIN": "JFK",
+  "DEST": "LAX"
+}
+'@
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/predict -ContentType 'application/json' -Body $body
+```
+
+Successful response:
+
+```json
+{
+  "prediction": 12.45,
+  "target": "ARR_DELAY",
+  "model": "lightgbm",
+  "source": "mlflow"
+}
+```
+
+Typical status codes are 200 for success, 422 for schema validation, 400 for feature validation errors, 500 for inference or feature-contract failures, and 503 when the model is not loaded.
+
+## Streamlit Application
+
+`app/app.py` collects carrier, origin, destination, date, scheduled departure and arrival times, distance, and scheduled duration. It sends those values to `POST /predict` and displays the predicted delay. The sidebar calls `/health`, and the model-information expander calls `/model`; both checks are cached for 15 seconds.
+
+## Docker
+
+The `Dockerfile` uses `python:3.11-slim`, installs `libgomp1` and `requirements.txt`, copies `config`, `src`, `app`, and the pinned model artifact to `/app/model_artifact`, and starts FastAPI by default. It exposes container ports 8000 and 8501.
+
+Build and run the API directly:
+
+```powershell
+docker build -t flight-delay-prediction .
+docker run --rm -p 8000:8000 flight-delay-prediction
+```
+
+Compose starts:
+
+| Service     | Container port | Host port | Behavior                            |
+| ----------- | -------------: | --------: | ----------------------------------- |
+| `api`       |           8000 |      1041 | FastAPI; healthchecked at `/health` |
+| `streamlit` |           1040 |      1043 | Streamlit; waits for a healthy API  |
+
+```powershell
+docker compose up --build
+docker compose down
+```
+
+Compose mounts `./mlruns` read-only and points the API at `/app/mlruns/.../artifacts`; the direct image default points at `/app/model_artifact`. Keep the artifact path, Dockerfile model ID, and `.dockerignore` exceptions synchronized when changing the served model.
 
 ## MLflow
 
-The trainer uses a local file-backed MLflow store:
+The local `.env` sets `MLFLOW_TRACKING_URI=sqlite:///mlflow.db`; the code default is `http://127.0.0.1:5000`. The configured experiment name is `flight_arr_delay_champion_model`.
+
+The checked-in model is under:
 
 ```text
-Tracking URI: sqlite:///mlflow.db
-Experiment: flight_arr_delay_prediction_categorical_features_V3
+mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts/
+├── MLmodel
+├── conda.yaml
+├── model.skops
+├── python_env.yaml
+└── requirements.txt
 ```
 
-Each training run logs:
+Its metadata identifies MLflow `3.15.1`, scikit-learn `1.9.0`, Python `3.11.9`, and skops serialization. `src.api.model_loader` uses `mlflow.sklearn.load_model()`, validates the `predict()` method and `preprocessor`/`model` pipeline steps, and records the fitted preprocessor's expected columns.
 
-- Model name and target name
-- Training and test row counts
-- Number of transformed features
-- Model parameters
-- Training time
-- Training and test RMSE, MAE, and R2
-- Feature-importance artifact
-- LightGBM model artifact
-
-Start the MLflow UI with:
-
-```powershell
-mlflow ui --backend-store-uri .\mlruns
-```
-
-Open the address printed by MLflow, normally `http://127.0.0.1:5000`.
-
-## Model Registration
-
-The registration script is `src/models/register.py`:
-
-```powershell
-python -m src.models.register
-```
-
-It searches a configured MLflow experiment for the finished run with the lowest `test_rmse` and registers the artifact under `flight_arr_delay_best_model`.
-
-Before using this script, verify that its `EXPERIMENT_NAME` matches the experiment created by `src/models/train.py`. The current trainer uses `flight_arr_delay_prediction_categorical_features_V2`, while the registration script contains a different experiment-name constant. This mismatch must be aligned before registration can reliably find the newest training runs.
+No MLflow server startup script is included. The API does not require a running MLflow server when `MLFLOW_MODEL_URI` points to the local artifact.
 
 ## Testing
 
-Run all tests from the repository root:
+Run the suite with the project interpreter:
 
 ```powershell
-python -m pytest
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-The current test file checks:
+Tests cover API health, prediction, validation, model metadata, rejection of `ARR_DELAY`, absence of historical feature names, feature engineering, preprocessing behavior, and the custom target encoder. No lint, formatter, type checker, or CI command is configured.
 
-- The preprocessor contains a one-hot transformer.
-- Unknown-category handling is set to `ignore`.
-- The custom target encoder produces out-of-fold values that differ from a full-data fit.
+## Development Guide
 
-For a quick import and syntax check:
+- Change loading or cleaning in `src/data/load.py` and `src/data/clean_data.py`.
+- Change the chronological split in `src/data/split_data.py`.
+- Add derived features in `src/features/build_feature.py` and synchronize feature lists in `config/config.py`.
+- Change imputation or category handling in `src/preprocessing/preprocess.py`.
+- Change model parameters, evaluation, or MLflow logging in `src/models/train.py`.
+- Change request/response contracts in `src/api/schemas.py` and endpoints in `src/api/main.py`.
+- Change the Streamlit client in `app/app.py`.
+- Add tests under `tests/`.
+- Change ports, healthchecks, or service dependencies in `docker-compose.yml`; change image contents in `Dockerfile`.
+
+When changing the model, retrain and log a new artifact, update `MLFLOW_MODEL_URI`, and update the Dockerfile model ID plus matching `.dockerignore` exceptions. Test both local and Compose startup because their artifact paths differ.
+
+## Troubleshooting
+
+| Problem                                          | Likely cause                                     | Solution                                                                         |
+| ------------------------------------------------ | ------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `No module named pytest` or another dependency   | System Python is being used                      | Activate `.venv` or use `.\.venv\Scripts\python.exe -m ...`                      |
+| API fails during startup with a model-load error | Model URI is missing, incorrect, or incompatible | Confirm the artifact exists and install `requirements.txt`                       |
+| Streamlit says the API is unavailable            | FastAPI is stopped or `API_URL` is wrong         | Start FastAPI first and set `API_URL` to its reachable base URL                  |
+| Docker healthcheck fails                         | Model artifact path or service startup problem   | Run `docker compose logs api`; verify model ID and `.dockerignore` exceptions    |
+| Prediction returns 422                           | Missing/wrong/unknown JSON field                 | Match the `FlightRequest` example; do not send `ARR_DELAY`                       |
+| Prediction returns 400                           | Invalid date, time, distance, or duration        | Use a parseable date, valid `HHMM`, non-negative distance, and positive duration |
+| Training cannot load data                        | No CSV files under `data/`                       | Place monthly input files directly in `data/`                                    |
+| Port conflict                                    | Another process uses 8000, 8501, 1041, or 1043   | Stop it or choose another port and update `API_URL`                              |
+
+## Limitations and Security
+
+- Model quality depends on the available monthly data and is not guaranteed for future schedules or unseen operating conditions.
+- The API has no authentication, authorization, rate limiting, or TLS. Do not expose it to an untrusted network without adding those controls.
+- The Streamlit selector lists are static common carrier and airport codes; the API accepts arbitrary strings and ignores unknown one-hot categories.
+- Local MLflow state, `.env`, and data should be treated as development assets. Never commit credentials or private data.
+- No license file is present.
+
+## Repository State
+
+The documented checkout is on branch `main`. The current `HEAD` is:
+
+```text
+daf919c (HEAD -> main, origin/main) Update the mlflow
+```
+
+Recent commits cover MLflow and EDA updates, Docker deployment, API fixes, feature updates, and API/Dockerfile additions. This README describes the current checkout, not older revisions.
+
+Basic Git commands:
 
 ```powershell
-python -m py_compile src/models/train.py
-python -c "from src.models.train import run_training; print('training module import passed')"
+git status
+git add README.md
+git commit -m "Document project setup and architecture"
+git push
 ```
 
-## Configuration
-
-Shared configuration is defined in `config/config.py`:
-
-- Target: `ARR_DELAY`
-- Test size: `0.2`
-- Random state: `42`
-- Model directory: `models/`
-- Numerical feature list
-- Categorical feature list
-- MLflow defaults
-- API host and port defaults
-
-Some executable values are currently defined directly in `src/models/train.py`, including the data directory, experiment name, tracking URI, and target name. When changing these values, update both configuration locations or consolidate them into one configuration source.
-
-## Reproducibility
-
-- Run commands from the repository root.
-- Keep input filenames and data contents fixed when comparing runs.
-- Keep Python and library versions consistent.
-- Use the same random state when sampling data or comparing experiments.
-- Fit the preprocessor only on training data.
-- Do not commit large generated MLflow artifacts unless they are intentionally part of the project history.
-
-## Known Limitations and Recommended Improvements
-
-1. Persist the fitted preprocessor together with the model so future prediction code uses the exact same one-hot vocabulary and numerical imputation values.
-2. Create a single inference function that accepts raw flight data and applies cleaning, feature engineering, preprocessing, and prediction in the correct order.
-3. Align the MLflow experiment name in `register.py` with the trainer.
-4. Add a pinned dependency file such as `requirements.txt` or `pyproject.toml`.
-5. Add end-to-end tests covering raw input through prediction.
-6. Add explicit checks for missing input columns and invalid time values.
-7. Add a deployment interface, such as FastAPI, only after the inference pipeline is persisted and tested.
-
-## License
-
-No license file is currently included in the repository. Add a project license before distributing the code publicly.
-
-
-
-uv run mlflow server `
->>   --host 127.0.0.1 `
->>   --port 5000 `
->>   --backend-store-uri sqlite:///mlflow.db `
->>   --artifacts-destination ./mlartifacts
-
-uv run uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
-
-http://127.0.0.1:8000/docs#/default/predict_predict_post
-
-uv run streamlit run app/app.py
-
-
-
-
-
-
-
-
-
-
-Load Data
-    ↓
-Clean Data
-    ↓
-Chronological Split
-    ↓
-Train Data        Test Data
-    │                  │
-    ▼                  ▼
-Build Features    Build Features
-    │                  │
-    │        history = Train Data
-    │                  │
-    └────────┬─────────┘
-             ↓
-        Split X / Y
-             ↓
-      X_train / y_train
-      X_test  / y_test
-             ↓
-        Preprocessing
-             ↓
-       Model Training
-             ↓
-          MLflow
-
-
-
-
-
-
-
-
-load_data
-   ↓
-clean_data
-   ↓
-chronological split
-   ↓
-build_features
-   ↓
-X_train / X_test / y_train / y_test
-   ↓
-validate_data
-   ↓
-train_model
-   ↓
-Pipeline
- ┌─────────────────┐
- │ Preprocessor    │
- │ OneHotEncoder   │
- └────────┬────────┘
-          ↓
- ┌─────────────────┐
- │ LightGBM        │
- └────────┬────────┘
-          ↓
-      Prediction
-          ↓
-       Metrics
-          ↓
-     MLflow Model
+No branching strategy is specified by the repository.
