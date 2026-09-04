@@ -179,36 +179,25 @@ def model_info():
 # PREDICT
 # ============================================================
 
-@app.post(
-    "/predict",
-    response_model=PredictionResponse,
-)
-def predict(
-    flight: FlightRequest,
-):
+@app.post("/predict",response_model=PredictionResponse,)
+def predict(flight: FlightRequest,) -> PredictionResponse:
 
     # --------------------------------------------------------
     # Get shared model state
     # --------------------------------------------------------
-
     state = get_state()
-
+    
+    
     if state.model is None:
-
-        raise HTTPException(
-            status_code=503,
-            detail="Model not loaded.",
-        )
+        raise HTTPException(status_code=503,detail="Model not loaded.",)
 
     try:
-
         # ====================================================
         # 1. REQUEST → DATAFRAME
         # ====================================================
 
-        df = pd.DataFrame(
-            [flight.model_dump()]
-        )
+
+        df = pd.DataFrame([flight.model_dump()])
 
         logger.info(
             "Received flight request: %s",
@@ -221,9 +210,7 @@ def predict(
         # 2. FEATURE ENGINEERING
         # ====================================================
 
-        features = build_features(
-            df
-        )
+        features = build_features(df)
 
         logger.info(
             "Feature engineering completed. "

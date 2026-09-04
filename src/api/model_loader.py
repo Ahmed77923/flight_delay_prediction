@@ -384,14 +384,9 @@ def get_model_info() -> dict[str, Any]:
         "historical_features_used": False,
     }
 
-    if hasattr(
-        pipeline,
-        "named_steps",
-    ):
+    if hasattr(pipeline,"named_steps",):
 
-        info["pipeline_steps"] = list(
-            pipeline.named_steps.keys()
-        )
+        info["pipeline_steps"] = list(pipeline.named_steps.keys())
 
         model = pipeline.named_steps.get(
             "model"
@@ -424,9 +419,7 @@ def get_model_info() -> dict[str, Any]:
 
 if __name__ == "__main__":
 
-    logging.basicConfig(
-        level=logging.INFO,
-    )
+    logging.basicConfig(level=logging.INFO,)
 
     load_pipeline()
 
@@ -435,42 +428,15 @@ if __name__ == "__main__":
     print("\n" + "=" * 70)
     print("MODEL LOADED")
     print("=" * 70)
+    
+    print("\nModel:",Config.MODEL.MODEL_NAME,)
+    print("Alias:",Config.MODEL.MODEL_ALIAS,)
 
-    print(
-        "\nModel:",
-        Config.MODEL.MODEL_NAME,
-    )
-
-    print(
-        "Alias:",
-        Config.MODEL.MODEL_ALIAS,
-    )
-
-    print(
-        "Version:",
-        state.version,
-    )
-
-    print(
-        "Expected features:",
-        len(state.expected_columns),
-    )
-
+    print("Version:",state.version,)
+    print("Expected features:",len(state.expected_columns),)
     print("\nExpected columns:")
-
     for column in state.expected_columns:
-        print(
-            f"  - {column}"
-        )
-
-    print(
-        "\nModel information:"
-    )
-
-    print(
-        get_model_info()
-    )
-
-    print(
-        "\nModel loading test passed."
-    )
+        print(f"  - {column}")
+    print("\nModel information:")
+    print(get_model_info())
+    print("\nModel loading test passed.")
