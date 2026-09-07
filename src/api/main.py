@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-
+from prometheus_fastapi_instrumentator import Instrumentator
 from src.api.model_loader import (
     get_state,
     load_pipeline,
@@ -110,7 +110,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-
+Instrumentator().instrument(app).expose(app)
 
 # ============================================================
 # ROOT

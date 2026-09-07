@@ -13,3 +13,4 @@ python-dotenv==1.2.3
 httpx==0.28.1
 requests==2.34.2
 skops==0.14.0
+prometheus-fastapi-instrumentator==8.1.0

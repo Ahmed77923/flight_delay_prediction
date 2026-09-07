@@ -9,11 +9,7 @@ services:
     environment:
       API_HOST: 0.0.0.0
       API_PORT: 8000
-
-      MLFLOW_MODEL_URI: /app/mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts
-
-    volumes:
-      - ./mlruns:/app/mlruns:ro
+      MLFLOW_MODEL_URI: /app/model_artifact
 
     healthcheck:
       test:
@@ -56,4 +52,38 @@ services:
 
     restart: unless-stopped
 
-    
+  prometheus:
+    image: prom/prometheus:latest
+
+    ports:
+      - "1042:9090"
+
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+
+    ports:
+      - "1044:3000"
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+    depends_on:
+      prometheus:
+        condition: service_started
+
+    restart: unless-stopped
+
+volumes:
+  grafana_data:
