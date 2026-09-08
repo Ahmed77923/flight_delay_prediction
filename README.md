@@ -465,3 +465,22 @@ git push
 ```
 
 No branching strategy is specified by the repository.
+
+
+
+```
+## to start testing ueser 
+locust -f tests/load/locustfile.py --host=http://localhost:1041
+
+
+## streamlit host
+http://127.0.0.1:1043/
+
+
+API host
+http://127.0.0.1:1041/docs
+
+
+grafana host
+http://localhost:1044
+```
