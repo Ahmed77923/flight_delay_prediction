@@ -1,4 +1,5 @@
 services:
+
   api:
     build: .
     image: flight-delay-prediction:latest
@@ -26,6 +27,7 @@ services:
 
     restart: unless-stopped
 
+
   streamlit:
     build: .
     image: flight-delay-prediction:latest
@@ -51,6 +53,7 @@ services:
         condition: service_healthy
 
     restart: unless-stopped
+
 
   prometheus:
     image: prom/prometheus:latest
@@ -79,11 +82,22 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
 
+      # Datasource provisioning
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro,Z
+
+      # Dashboard provisioning
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,Z
+
+      # Dashboard JSON
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro,Z
+
     depends_on:
       prometheus:
         condition: service_started
 
     restart: unless-stopped
 
+
 volumes:
   grafana_data:
+
