@@ -27,3 +27,6 @@ model_comparison_results_one_Hot.csv
 # OS
 .DS_Store
 Thumbs.db
+
+
+.env
