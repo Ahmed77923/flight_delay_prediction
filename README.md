@@ -128,7 +128,7 @@ There is no Prometheus, Grafana, Kubernetes, Helm, Terraform, CI/CD, database ap
 │   └── 4/                             Local MLflow experiment and model artifact
 ├── notebook/
 │   ├── note1.ipynb                    Notebook analysis
-│   └── note2.ipynb                    Notebook analysis
+|
 ├── src/
 │   ├── api/
 │   │   ├── main.py                    FastAPI application and endpoints

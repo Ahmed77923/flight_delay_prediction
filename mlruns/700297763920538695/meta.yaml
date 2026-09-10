@@ -1,0 +1,9 @@
+artifact_location: mlflow-artifacts:/700297763920538695
+creation_time: 1788968291706
+effective_trace_archival_retention: null
+experiment_id: '700297763920538695'
+last_update_time: 1788968291706
+lifecycle_stage: active
+name: ex_1
+trace_location: null
+workspace: default
