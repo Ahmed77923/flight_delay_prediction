@@ -31,11 +31,15 @@ jobs:
 
       - name: Build Docker image
         run: |
+          IMAGE_NAME="ghcr.io/ahmed77923/flight-delay-prediction"
+
           docker build \
-            -t ghcr.io/ahmed77923/flight-delay-prediction:latest .
+            -t "$IMAGE_NAME:${{ github.event.workflow_run.head_sha }}" \
+            -t "$IMAGE_NAME:latest" .
 
       - name: Push Docker image
         run: |
-          docker push \
-            ghcr.io/ahmed77923/flight-delay-prediction:latest
-            
+          IMAGE_NAME="ghcr.io/ahmed77923/flight-delay-prediction"
+          
+          docker push "$IMAGE_NAME:${{ github.event.workflow_run.head_sha }}"
+          docker push "$IMAGE_NAME:latest"
