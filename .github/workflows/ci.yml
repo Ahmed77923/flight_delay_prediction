@@ -5,9 +5,11 @@ on:
   push:
     branches:
       - main
+      - develop
   pull_request:
     branches:
       - main
+      - develop
 
 jobs:
   test:
@@ -27,6 +29,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+
       - name: Run tests
         run: |
-          pytest -v
+          python -m pytest -v
+
+# Additionally, you can add more jobs or steps to the CI workflow as needed, such as linting, code coverage, or deployment steps.
