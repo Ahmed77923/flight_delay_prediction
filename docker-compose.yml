@@ -67,7 +67,7 @@ services:
       - "1043:1040"
 
     environment:
-      # API_URL: http://api:8000
+      API_URL: http://api:8000
       MLFLOW_TRACKING_URI: http://mlflow:5000
 
     depends_on:

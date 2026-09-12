@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import sys
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
 import mlflow
 import mlflow.sklearn
-from mlflow import MlflowClient
 from dotenv import load_dotenv
 
-from config.config import Config
 
+from config.config import Config
 
 # ============================================================
 # ENVIRONMENT
@@ -102,11 +101,6 @@ def load_pipeline() -> None:
     # ========================================================
 
     logger.info(
-        "MLflow tracking URI: %s",
-        MLFLOW_TRACKING_URI,
-    )
-
-    logger.info(
         "MLflow model URI: %s",
         MODEL_URI,
     )
@@ -115,23 +109,10 @@ def load_pipeline() -> None:
     # VALIDATE CONFIGURATION
     # ========================================================
 
-    if not MLFLOW_TRACKING_URI:
-        raise RuntimeError(
-            "MLFLOW_TRACKING_URI is not configured."
-        )
-
     if not MODEL_URI:
         raise RuntimeError(
             "MLFLOW_MODEL_URI is not configured."
         )
-
-    # ========================================================
-    # CONFIGURE MLFLOW
-    # ========================================================
-
-    mlflow.set_tracking_uri(
-        MLFLOW_TRACKING_URI
-    )
 
     # ========================================================
     # LOAD MODEL
@@ -139,9 +120,16 @@ def load_pipeline() -> None:
 
     try:
 
+        mlflow.set_tracking_uri("http://127.0.0.1:1040")
+
         pipeline = mlflow.sklearn.load_model(
-            MODEL_URI
+           model_uri=MODEL_URI
         )
+
+        # print(pipeline)
+        # pipeline = mlflow.sklearn.load_model(
+        #     MODEL_URI
+        # )
 
     except Exception as exc:
 

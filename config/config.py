@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 
+
 class DataConfig:
     """Configuration related to data."""
 
@@ -37,7 +38,7 @@ class ModelConfig:
 class PreprocessingConfig:
     """Configuration for model preprocessing."""
 
-    CATEGORICAL_FEATURES: List[str] = [
+    CATEGORICAL_FEATURES: list[str] = [  # noqa: RUF012
         "OP_UNIQUE_CARRIER",                        
         "ORIGIN",                                  
         "DEST",                                    
@@ -47,7 +48,7 @@ class PreprocessingConfig:
 
     ]
 
-    NUMERICAL_FEATURES: List[str] = [
+    NUMERICAL_FEATURES: List[str] = [  # noqa: RUF012
         "CRS_ELAPSED_TIME",
         "DISTANCE",
 
@@ -83,17 +84,19 @@ class MLflowConfig:
 
     TRACKING_URI: str = os.getenv(
         "MLFLOW_TRACKING_URI",
-        "http://127.0.0.1:5000",
+        "http://127.0.0.1:1040",
     )
 
     MODEL_URI: str = os.getenv(
         "MLFLOW_MODEL_URI",
-        "mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts",
+        "/app/model_artifact",
     )
 
-    EXPERIMENT_NAME: str = (
-        "flight_arr_delay_champion_model1"
+    EXPERIMENT_NAME: str = os.getenv(
+        "MLFLOW_EXPERIMENT_NAME",
+        "flight_arr_delay_champion_model1",
     )
+
 
 class APIConfig:
     """Configuration related to FastAPI."""
@@ -107,9 +110,8 @@ class APIConfig:
     # reaches it.
     BASE_URL: str = os.getenv(
         "API_URL",
-        "http://127.0.0.1:8000",
+         "http://127.0.0.1:1041",
     )
-
 
 class Config:
     """Main project configuration."""

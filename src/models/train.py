@@ -63,7 +63,6 @@ warnings.filterwarnings("ignore")
 # ============================================================
 # MLFLOW SETUP
 # ============================================================
-# mlflow.set_tracking_uri("http://127.0.0.1:5000")1
 USE_MLFLOW = True 
 if USE_MLFLOW:
     mlflow.set_tracking_uri(
@@ -847,16 +846,11 @@ def run_training(
                 # --------------------------------------------
 
                 mlflow.sklearn.log_model(
-                    pipeline,
-                    name="model",
-                    skops_trusted_types=[
-                        "collections.OrderedDict",
-                        "lightgbm.basic.Booster",
-                        "lightgbm.sklearn.LGBMRegressor",
-                        "numpy.dtype",
-                    ],
-                )
-
+                        pipeline,
+                        name="model",
+                        serialization_format="cloudpickle",
+                    )
+                
                 # --------------------------------------------
                 # RESULT
                 # --------------------------------------------

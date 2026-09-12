@@ -1,0 +1,14 @@
+artifact_uri: mlflow-artifacts:/200825432921133152/6ecc72acb92b4c23bd513ce676711e4d/artifacts
+end_time: 1789249501502
+entry_point_name: ''
+experiment_id: '200825432921133152'
+lifecycle_stage: active
+run_id: 6ecc72acb92b4c23bd513ce676711e4d
+run_name: lightgbm
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789249126262
+status: 3
+tags: []
+user_id: ahmed_alsafi
