@@ -1,0 +1,9 @@
+artifact_location: mlflow-artifacts:/200825432921133152
+creation_time: 1789221509360
+effective_trace_archival_retention: null
+experiment_id: '200825432921133152'
+last_update_time: 1789221509360
+lifecycle_stage: active
+name: flight_arr_delay_champion_model1
+trace_location: null
+workspace: default

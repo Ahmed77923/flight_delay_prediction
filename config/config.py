@@ -75,8 +75,7 @@ class PreprocessingConfig:
 
         "distance_log",
         "is_peak_departure",
-
-        
+   
     ]
 
 class MLflowConfig:
@@ -93,7 +92,7 @@ class MLflowConfig:
     )
 
     EXPERIMENT_NAME: str = (
-        "flight_arr_delay_champion_model"
+        "flight_arr_delay_champion_model1"
     )
 
 class APIConfig:

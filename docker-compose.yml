@@ -67,7 +67,8 @@ services:
       - "1043:1040"
 
     environment:
-      API_URL: http://api:8000
+      # API_URL: http://api:8000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
 
     depends_on:
       api:
@@ -80,7 +81,7 @@ services:
     image: prom/prometheus:latest
 
     ports:
-      - "1042:9090"
+      - "1044:9090"
 
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
@@ -98,7 +99,7 @@ services:
     image: grafana/grafana:latest
 
     ports:
-      - "1044:3000"
+      - "1042:3000"
 
     volumes:
       - grafana_data:/var/lib/grafana
