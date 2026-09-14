@@ -32,7 +32,7 @@ class FlightDelayUser(HttpUser):
             name="/predict-valid",
         )
 
-    @task(30)
+    @task(3)
     def predict_invalid(self):
         payload = {
             "FL_DATE": "WRONG-DATE",
