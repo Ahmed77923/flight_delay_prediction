@@ -14,7 +14,7 @@ models/*.pkl
 models/*.onnx
 mlflow.db
 # Data
-data/
+/data/
 *.csv
 *.parquet
 
