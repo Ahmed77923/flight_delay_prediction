@@ -1,310 +1,358 @@
-# Flight Delay Prediction
+# ✈️ Flight Delay Prediction
 
-## Project Overview
+An end-to-end machine-learning project that predicts a flight's **arrival delay (in minutes)** from information known before departure. It covers the full lifecycle: data cleaning, feature engineering, LightGBM training with MLflow tracking, a FastAPI inference service, a Streamlit UI, Prometheus/Grafana monitoring, Docker Compose orchestration, and a GitHub Actions CI/CD pipeline.
 
-Flight Delay Prediction is a machine-learning system that estimates a flight's arrival delay in minutes using information available before departure. The project covers data loading and cleaning, feature engineering, model training and evaluation, MLflow artifact tracking, model loading, a FastAPI prediction service, and a Streamlit user interface.
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white)
+![LightGBM](https://img.shields.io/badge/LightGBM-model-2E8B57)
+![MLflow](https://img.shields.io/badge/MLflow-tracking-0194E2?logo=mlflow&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-metrics-E6522C?logo=prometheus&logoColor=white)
+![Grafana](https://img.shields.io/badge/Grafana-dashboards-F46800?logo=grafana&logoColor=white)
 
-This implementation is a supervised **regression** problem, not a delayed/not-delayed classification problem. The target is the continuous `ARR_DELAY` value. The API returns a numeric prediction in minutes and does not currently return a probability or confidence score.
+---
 
-```text
-Historical flight data
-  -> Data cleaning
-  -> Feature engineering
-  -> Chronological train/test split
-  -> Preprocessing
-  -> LightGBM regression model
-  -> Evaluation and MLflow logging
-  -> Loaded model pipeline
-  -> FastAPI prediction API
-  -> Streamlit interface
-```
+## Table of Contents
 
-## Main Objective
+1. [What this project does](#what-this-project-does)
+2. [Architecture](#architecture)
+3. [Project structure](#project-structure)
+4. [Tech stack](#tech-stack)
+5. [Machine-learning pipeline](#machine-learning-pipeline)
+6. [Model results](#model-results)
+7. [Getting started](#getting-started)
+8. [Configuration](#configuration)
+9. [API reference](#api-reference)
+10. [Streamlit application](#streamlit-application)
+11. [MLflow](#mlflow)
+12. [Docker and Docker Compose](#docker-and-docker-compose)
+13. [Monitoring: Prometheus and Grafana](#monitoring-prometheus-and-grafana)
+14. [Testing](#testing)
+15. [CI/CD](#cicd)
+16. [Deployment](#deployment)
+17. [Known limitations](#known-limitations)
+18. [Documentation](#documentation)
 
-The project is intended to provide an end-to-end flight-delay prediction workflow that can:
+---
 
-- process historical monthly flight CSV files;
-- prepare date, time, route, carrier, and distance features;
-- train and evaluate a LightGBM regression model;
-- track training runs and model artifacts with MLflow;
-- load a selected local model artifact for inference;
-- expose predictions through FastAPI; and
-- provide a browser-based Streamlit client.
+## What this project does
 
-Monitoring services, authentication, model registry promotion workflows, and future-date mapping are not implemented in the current checkout.
+- **Problem type:** supervised **regression**. The target is the continuous `ARR_DELAY` column (minutes). A negative value means the flight is predicted to arrive early. There is no delayed / not-delayed classification and no probability or confidence score.
+- **Inputs (8 fields per flight):** flight date, scheduled departure time, scheduled arrival time, scheduled duration, distance, carrier, origin airport, destination airport.
+- **Model:** a scikit-learn `Pipeline` (`preprocessor` → `model`) wrapping a `LightGBM` `LGBMRegressor`, tracked and stored with MLflow.
+- **Serving:** FastAPI loads the pipeline once at startup and exposes `/predict`, `/health`, `/model` and Prometheus `/metrics`. Streamlit is a thin HTTP client on top of it.
+- **No historical lookups:** the model uses only the fields in the request. It does not query previous flights or prior-delay statistics at inference time (`/model` reports `historical_features_used: false`).
 
-The model uses information available for one flight request: scheduled date and times, carrier, airports, scheduled duration, and distance. It does not query historical flights or use previous-flight delay statistics at inference time.
-
-The current model uses information available for one flight request: scheduled date and times, carrier, airports, scheduled duration, and distance. It does not query historical flights or use previous-flight delay statistics at inference time.
-
-## Quick Start
-
-From the repository root on Windows PowerShell:
-
-```powershell
-
-python -m pip install -r requirements.txt
-uvicorn src.api.main:app --host 127.0.0.1 --port 8000
-```
-
-In a second terminal, activate the same environment and start the UI:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-streamlit run app/app.py
-```
-
-Open `http://127.0.0.1:8501` for Streamlit or `http://127.0.0.1:8000/docs` for FastAPI. The API loads the committed model artifact at startup.
-
-For the containerized application:
-
-```powershell
-docker compose up --build
-```
-
-Then open `http://127.0.0.1:1043` for Streamlit and `http://127.0.0.1:1041/docs` for FastAPI.
-
-## Contents
-
-- [Architecture](#architecture)
-- [Repository Structure](#repository-structure)
-- [Requirements and Installation](#requirements-and-installation)
-- [Configuration](#configuration)
-- [Running Locally](#running-locally)
-- [Machine-Learning Pipeline](#machine-learning-pipeline)
-- [API](#api)
-- [Streamlit Application](#streamlit-application)
-- [Docker](#docker)
-- [MLflow](#mlflow)
-- [Testing](#testing)
-- [Development Guide](#development-guide)
-- [Troubleshooting](#troubleshooting)
-- [Limitations and Security](#limitations-and-security)
-- [Repository State](#repository-state)
+---
 
 ## Architecture
+
+### Runtime (Docker Compose)
+
+```mermaid
+flowchart LR
+    User([User / Browser]) -->|1043| ST[Streamlit UI]
+    User -->|1041 /docs| API
+    ST -->|HTTP POST /predict| API[FastAPI API<br/>LightGBM pipeline]
+    API -->|/metrics| PR[Prometheus]
+    PR -->|1044| User
+    PR --> GR[Grafana]
+    GR -->|1042| User
+    ML[MLflow server] -->|1040| User
+    ML --- RUNS[(./mlruns)]
+    MODEL[(models/model_artifact/model<br/>baked into image)] --> API
+```
 
 ### Training flow
 
 ```text
-data/month_*.csv
-    -> load_data()
-    -> clean_data()
-    -> chronological 80/20 split
-    -> build_features()
-    -> zero-imputation + sparse one-hot encoding
-    -> LightGBM regression pipeline
-    -> RMSE, MAE, and R2 evaluation
-    -> MLflow run, feature-importance artifact, and model artifact
+data/*.csv
+  → load_data()                     concatenate all monthly CSVs
+  → clean_data()                    filter cancelled/diverted/invalid rows, IQR outlier removal on ARR_DELAY
+  → split_data()                    chronological 80/20 split by FL_DATE
+  → build_features()                calendar, time, cyclical, route/carrier and distance features
+  → ColumnTransformer               constant imputation (numeric) + sparse one-hot (categorical)
+  → LGBMRegressor                   wrapped together with the preprocessor in one sklearn Pipeline
+  → RMSE / MAE / R² (train + test)
+  → MLflow                          params, metrics, feature_importance.csv, model
 ```
 
 ### Inference flow
 
 ```text
-FlightRequest JSON
-    -> FastAPI POST /predict
-    -> pandas DataFrame
-    -> build_features()
-    -> select fitted preprocessor input columns
-    -> loaded MLflow sklearn Pipeline
-    -> PredictionResponse
+POST /predict (FlightRequest JSON)
+  → Pydantic validation             unknown fields rejected (extra="forbid")
+  → pandas DataFrame
+  → build_features()                same code path as training
+  → select the 29 columns the fitted preprocessor expects
+  → NaN / missing-column checks
+  → Pipeline.predict()
+  → PredictionResponse              prediction rounded to 2 decimals
 ```
 
-Streamlit is a thin HTTP client. It sends requests to FastAPI and does not load the model or perform feature engineering itself.
+Training and serving share `build_features()`, and the API selects columns from the fitted preprocessor's `feature_names_in_`. This keeps the serving feature contract identical to training.
 
-There is no Prometheus, Grafana, Kubernetes, Helm, Terraform, CI/CD, database application layer, or authentication implementation in this repository. MLflow is used for tracking and model artifacts; the API serves the local artifact directly.
+---
 
-## Repository Structure
+## Project structure
 
 ```text
-.
+flight_delay_prediction/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                     Run pytest on push / PR to main and develop
+│       ├── cd.yml                     Build and push Docker image to GHCR after CI succeeds on main
+│       └── pytest.ini                 Copy of the root pytest config
 ├── app/
-│   └── app.py                         Streamlit client application
+│   └── app.py                         Streamlit client (calls the API over HTTP)
 ├── config/
-│   └── config.py                      Shared configuration classes
-├── data/
-│   ├── month_1.csv ... month_12.csv   Input monthly CSV data
-├── mlruns/
-│   └── 4/                             Local MLflow experiment and model artifact
+│   └── config.py                      Central configuration (data, model, features, MLflow, API)
+├── data/                              Monthly flight CSVs (git-ignored, not in the repo)
+├── docs/                              Detailed project documentation (see "Documentation")
+├── mlruns/                            Local MLflow file store (experiment runs, metrics, params)
+├── models/
+│   └── model_artifact/model/          Bundled MLflow model served by the API
+│       ├── MLmodel
+│       ├── model.pkl                  Fitted sklearn Pipeline (cloudpickle)
+│       ├── conda.yaml / python_env.yaml / requirements.txt
+│       └── registered_model_meta
+├── monitoring/
+│   ├── prometheus/
+│   │   └── prometheus.yml             Scrapes api:8000/metrics every 15s
+│   └── grafana/
+│       ├── dashboards/
+│       │   └── flight_delay_dashboard.json
+│       └── provisioning/
+│           ├── datasources/prometheus.yml
+│           └── dashboards/dashboards.yml
+├── nginx/
+│   └── flight-delay.duckdns.org.conf  Reverse-proxy site config for the VPS (not run by Compose)
 ├── notebook/
-│   ├── note1.ipynb                    Notebook analysis
-|
+│   └── note1.ipynb                    Exploratory analysis
 ├── src/
 │   ├── api/
-│   │   ├── main.py                    FastAPI application and endpoints
-│   │   ├── model_loader.py             MLflow pipeline loading and state
-│   │   └── schemas.py                  Pydantic request/response schemas
+│   │   ├── main.py                    FastAPI app, endpoints, Prometheus instrumentation
+│   │   ├── model_loader.py            Loads and validates the MLflow pipeline; holds shared model state
+│   │   └── schemas.py                 Pydantic request / response models
 │   ├── data/
-│   │   ├── load.py                     CSV loading and concatenation
-│   │   ├── clean_data.py               Training-data filtering
-│   │   └── split_data.py               Chronological train/test split
+│   │   ├── load.py                    Load and concatenate monthly CSVs
+│   │   ├── clean_data.py              Training-time filtering and outlier removal
+│   │   └── split_data.py              Chronological train/test split
 │   ├── features/
-│   │   └── build_feature.py            Feature engineering
+│   │   └── build_feature.py           Feature engineering (shared by training and API)
 │   ├── models/
-│   │   └── train.py                    Model training and MLflow logging
+│   │   └── train.py                   Training, evaluation and MLflow logging
 │   └── preprocessing/
-│       ├── preprocess.py               Imputation and one-hot preprocessing
-│       └── target_encoder.py            Separately tested custom encoder
+│       ├── preprocess.py              ColumnTransformer (imputer + one-hot encoder)
+│       └── target_encoder.py          Out-of-fold target encoder (tested, not used in the active pipeline)
 ├── tests/
-│   ├── test_api.py                     FastAPI endpoint tests
-│   ├── test_build_features.py           Feature engineering tests
-│   └── test_target_encoding.py          Target-encoder tests
-├── .dockerignore                       Docker build exclusions
-├── .env                                Local environment values; do not commit secrets
-├── .gitignore                          Git exclusions
-├── docker-compose.yml                  API and Streamlit services
-├── Dockerfile                          Python image and API startup
-├── mlflow.db                           Local MLflow backend database
-├── requirements.txt                    Pinned Python dependencies
-└── README.md                           Project documentation
+│   ├── load/
+│   │   └── locustfile.py              Locust load-test scenarios
+│   ├── test_api.py                    API endpoint tests (with a fake model)
+│   ├── test_build_features.py         Feature-engineering tests
+│   └── test_target_encoding.py        Preprocessor and target-encoder tests
+├── .dockerignore
+├── .gitignore
+├── Dockerfile
+├── docker-compose.yml
+├── pytest.ini
+├── requirements.txt
+└── README.md
 ```
 
-`models/` is referenced by configuration but is not present in this checkout. Generated CSV files and ordinary local model files are ignored by Git. The committed `mlruns/` content includes the model used by the API.
+---
 
-## Requirements and Installation
+## Tech stack
 
-The Dockerfile uses `python:3.11-slim`; the committed model metadata was created with Python `3.11.9`. Use Python 3.11 for the closest match.
+| Area | Tools (pinned in `requirements.txt`) |
+| --- | --- |
+| Language | Python 3.11 (Docker image and CI) |
+| ML | LightGBM 4.7.0, scikit-learn 1.9.0, pandas 2.3.3, NumPy 2.4.6, SciPy 1.17.1 |
+| Experiment tracking | MLflow 3.15.1 |
+| API | FastAPI 0.141.1, Uvicorn 0.52.4, Pydantic (via FastAPI) |
+| UI | Streamlit 1.62.0, requests 2.34.2 |
+| Metrics | prometheus-fastapi-instrumentator 8.1.0 |
+| Testing | pytest 9.1.1, httpx 0.28.1 (FastAPI `TestClient`), Locust (load tests, not in `requirements.txt`) |
+| Infrastructure | Docker, Docker Compose, Prometheus, Grafana, Nginx (VPS config), GitHub Actions, GHCR |
 
-The project has no Node.js, GPU/CUDA, database-server, or operating-system dependency for local Python execution. Docker installs Linux `libgomp1`, required by LightGBM in the container.
+---
 
-Install the exact pinned dependencies with:
+## Machine-learning pipeline
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+### Data
 
-`requirements.txt` pins Streamlit, pandas, NumPy, scikit-learn, LightGBM, SciPy, MLflow, pytest, FastAPI, Uvicorn, python-dotenv, httpx, requests, and skops.
-
-## Configuration
-
-Configuration is loaded by `config/config.py` with `python-dotenv`.
-
-| Variable              | Required | Default in code                                                | Purpose                                                       |
-| --------------------- | -------: | -------------------------------------------------------------- | ------------------------------------------------------------- |
-| `MLFLOW_TRACKING_URI` |       No | `http://127.0.0.1:5000`                                        | MLflow tracking URI used by training and model loading        |
-| `MLFLOW_MODEL_URI`    |       No | `mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts` | Model artifact loaded by the API                              |
-| `API_HOST`            |       No | `0.0.0.0` in Docker configuration                              | API bind host                                                 |
-| `API_PORT`            |       No | `8000`                                                         | API listening port                                            |
-| `API_URL`             |       No | `http://127.0.0.1:8000`                                        | URL used by Streamlit to reach FastAPI                        |
-| `TRAINING_YEAR`       |       No | `2025`                                                         | Defined in configuration; not used by the active trainer flow |
-| `LOG_LEVEL`           |       No | Not consumed by application code                               | Present in local `.env`, but no code reads it                 |
-
-The local `.env` contains machine-specific values and is not reproduced here. There is no `.env.example` file. A safe template is:
+`load_data()` reads and concatenates every `data/*.csv` (sorted by filename). The CSVs are not committed (`data/` and `*.csv` are git-ignored), so training requires you to supply your own files with this schema:
 
 ```text
-MLFLOW_TRACKING_URI=http://127.0.0.1:5000
-MLFLOW_MODEL_URI=mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts
-API_HOST=127.0.0.1
-API_PORT=8000
-API_URL=http://127.0.0.1:8000
+YEAR, QUARTER, MONTH, FL_DATE, OP_UNIQUE_CARRIER, ORIGIN_AIRPORT_ID, ORIGIN,
+DEST_AIRPORT_ID, DEST, CRS_DEP_TIME, CRS_ARR_TIME, ARR_DELAY, CANCELLED,
+DIVERTED, CRS_ELAPSED_TIME, DISTANCE
 ```
 
-## Running Locally
+Scheduled times are `HHMM` values (for example `0500` or `1430`).
 
-### Start FastAPI
+### Cleaning (`src/data/clean_data.py`)
 
-```powershell
-uvicorn src.api.main:app --host 127.0.0.1 --port 8000
-```
+1. Require `CANCELLED`, `DIVERTED`, `CRS_ELAPSED_TIME` and `ARR_DELAY` columns.
+2. Drop cancelled and diverted flights.
+3. Drop rows with `CRS_ELAPSED_TIME <= 0`.
+4. Drop rows with a missing `ARR_DELAY`.
+5. Remove `ARR_DELAY` outliers outside the 1.5 × IQR bounds.
 
-The application loads and validates the MLflow pipeline during startup. A missing or incompatible model prevents startup.
+### Split (`src/data/split_data.py`)
 
-### Start Streamlit
+Rows are sorted by `FL_DATE`. The earliest 80% are used for training and the latest 20% for testing, so the model is evaluated on later flights than it was trained on. The preprocessor is fitted on the training set only.
 
-With FastAPI running in another terminal:
+### Feature engineering (`src/features/build_feature.py`)
 
-```powershell
-streamlit run app/app.py
-```
+`build_features()` validates the raw columns, then derives the model input. The final model uses **29 features** (list defined in `config/config.py`):
 
-To point the UI at another API:
+| Group | Features |
+| --- | --- |
+| Raw numeric | `CRS_ELAPSED_TIME`, `DISTANCE` |
+| Calendar | `year`, `month`, `quarter`, `day`, `day_of_week`, `week_of_year`, `is_weekend` |
+| Scheduled time | `departure_hour`, `departure_minute`, `departure_time_minutes`, `arrival_hour`, `arrival_minute`, `arrival_time_minutes` |
+| Cyclical (sin / cos) | `departure_hour`, `day_of_week`, `month` |
+| Derived numeric | `distance_log` (`log1p(DISTANCE)`), `is_peak_departure` (hours 7–9 and 16–19) |
+| Categorical | `OP_UNIQUE_CARRIER`, `ORIGIN`, `DEST`, `route` (`ORIGIN_DEST`), `carrier_origin` (`CARRIER_ORIGIN`), `departure_period` (night / morning / afternoon / evening) |
 
-```powershell
-$env:API_URL = "http://127.0.0.1:9000"
-streamlit run app/app.py
-```
+It raises `ValueError` on invalid dates, invalid `HHMM` times, negative distance, missing features, or NaN model inputs. The optional `history` argument is accepted for compatibility but no historical statistics are computed.
 
-### Train
+### Preprocessing (`src/preprocessing/preprocess.py`)
 
-Training reads all `*.csv` files under `data/`, cleans them, performs a chronological split, builds features, trains LightGBM, evaluates it, and logs the run and model to MLflow:
+A `ColumnTransformer` with:
 
-```powershell
-python -m src.models.train
-```
+- **Numeric:** `SimpleImputer(strategy="constant", fill_value=0)`
+- **Categorical:** `OneHotEncoder(handle_unknown="ignore", sparse_output=True)`, so unseen carriers or airports are ignored instead of raising errors.
 
-For a smaller experiment:
+### Model (`src/models/train.py`)
 
-```powershell
-python -m src.models.train --sample-size 100000
-```
-
-The alias `--sample_size` is also accepted. A positive sample size is required. The active trainer defines one model, `lightgbm`, and always enables MLflow tracking.
-
-### Inspect the model loader
-
-```powershell
-python -m src.api.model_loader
-```
-
-## Machine-Learning Pipeline
-
-### Dataset and cleaning
-
-`src.data.load.load_data()` reads and concatenates sorted CSV files matching `data/*.csv`. The checked-in dataset contains `month_1.csv` through `month_12.csv`.
-
-Training cleaning requires `CANCELLED`, `DIVERTED`, `CRS_ELAPSED_TIME`, and `ARR_DELAY`. It keeps non-cancelled, non-diverted flights with positive scheduled duration, drops missing targets, and removes `ARR_DELAY` values outside the 1.5 IQR bounds.
-
-Feature construction additionally requires:
-
-```text
-FL_DATE, CRS_DEP_TIME, CRS_ARR_TIME, CRS_ELAPSED_TIME,
-DISTANCE, OP_UNIQUE_CARRIER, ORIGIN, DEST
-```
-
-`FL_DATE` must be parseable as a date. Scheduled times are integer `HHMM` values, such as `800` or `1430`.
-
-### Split and features
-
-`split_data()` sorts by `FL_DATE` and assigns the earliest 80% to training and the latest 20% to testing. The preprocessor is fitted on training features and only transformed on test features.
-
-`build_features()` creates calendar features (`year`, `month`, `quarter`, `day`, `day_of_week`, `week_of_year`, `is_weekend`), schedule/time features, cyclical sine/cosine features, route and carrier-origin categories, `distance_log`, and `is_peak_departure`.
-
-The optional `history` parameter is accepted for compatibility but no historical statistics are calculated. The API calls `build_features()` with a single request.
-
-### Preprocessing and model
-
-Numerical columns use `SimpleImputer(strategy="constant", fill_value=0)`. Categorical columns use `OneHotEncoder(handle_unknown="ignore", sparse_output=True)`. The resulting `ColumnTransformer` preserves sparse output.
-
-The active model is `lightgbm.LGBMRegressor` with:
+`LGBMRegressor` with the following hyperparameters:
 
 ```text
 num_leaves=63, max_depth=-1, learning_rate=0.10, n_estimators=1000,
-min_child_samples=200, reg_alpha=0.0, reg_lambda=1.0,
-colsample_bytree=1.0, n_jobs=-1, random_state=42, verbosity=-1
+min_child_samples=200, reg_alpha=0.0, reg_lambda=1.0, colsample_bytree=1.0,
+n_jobs=-1, random_state=42
 ```
 
-The fitted preprocessor and model are stored together in an sklearn `Pipeline`, then logged to MLflow using skops serialization. The checked-in artifact is model ID `m-6d479b8fd10a4744862b3b6ec29260d8`, from run `5407198a78d545f4a3d1ded962e0ed07`.
+The preprocessor and model are wrapped in one sklearn `Pipeline` with steps named `preprocessor` and `model`. The API validates these names at startup.
 
-Training calculates RMSE, MAE, and R2 for train and test predictions and logs feature importance as `feature_importance.csv` inside the MLflow run.
+---
 
-## API
+## Model results
 
-The entry point is `src.api.main:app`. FastAPI loads the model once during application startup.
+Metrics come from the MLflow runs committed in `mlruns/` (experiment `flight_arr_delay_champion_model1`, chronological split, RMSE and MAE in minutes):
 
-| Method | Endpoint   | Description                                 |
-| ------ | ---------- | ------------------------------------------- |
-| `GET`  | `/`        | Service name, version, and endpoint list    |
-| `GET`  | `/health`  | Model-loaded health status                  |
-| `GET`  | `/model`   | Loaded pipeline and expected input metadata |
-| `POST` | `/predict` | Predict arrival delay                       |
-| `GET`  | `/docs`    | Interactive FastAPI documentation           |
+| Run | Train rows | Test rows | Test RMSE | Test R² |
+| --- | ---: | ---: | ---: | ---: |
+| `7dc7a612…` (**bundled model**) | 80,000 | 20,000 | 17.71 | 0.037 |
+| `3f939f23…` | 800,000 | 200,000 | 18.24 | 0.035 |
+| `6ecc72ac…` (largest) | 4,000,000 | 1,000,000 | 16.96 | 0.059 |
 
-### Request
+The model bundled in `models/model_artifact/model` comes from run `7dc7a612afa34edd92e44cc98a63bf8e` (test MAE 13.47, train R² 0.46). Test R² is low in every run: arrival delay is hard to predict from schedule-only features, and the model shows a large train/test gap. Treat this project as a complete, working ML system rather than a highly accurate delay predictor.
 
-`POST /predict` accepts exactly these JSON fields. Unknown fields, including `ARR_DELAY`, are rejected with HTTP 422.
+---
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.11 (the Docker image and CI use 3.11)
+- Docker and Docker Compose (only for the containerized setup)
+- The bundled model at `models/model_artifact/model` (already in the repo). The data CSVs are only needed for training.
+
+### Option A: Run everything with Docker Compose
+
+```bash
+docker compose up --build
+```
+
+| Service | URL |
+| --- | --- |
+| Streamlit UI | http://localhost:1043 |
+| FastAPI (Swagger UI) | http://localhost:1041/docs |
+| Prometheus | http://localhost:1044 |
+| Grafana | http://localhost:1042 |
+| MLflow UI | http://localhost:1040 |
+
+Stop with `docker compose down`.
+
+### Option B: Run locally without Docker
+
+```bash
+python -m venv .venv
+source .venv/bin/activate            # Windows PowerShell: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Point the API at the bundled model (the code default is the Docker path /app/model_artifact)
+export MLFLOW_MODEL_URI=models/model_artifact/model
+uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, start the UI. `API_URL` must be set because the code default targets the Compose port (`http://127.0.0.1:1041`):
+
+```bash
+source .venv/bin/activate
+export API_URL=http://127.0.0.1:8000
+streamlit run app/app.py
+```
+
+Open http://127.0.0.1:8501 for Streamlit and http://127.0.0.1:8000/docs for the API. You can put these variables in a `.env` file instead of exporting them; `python-dotenv` loads it automatically.
+
+Quick check of the model loader:
+
+```bash
+python -m src.api.model_loader
+```
+
+### Train a model
+
+Training needs the monthly CSVs in `data/` and an MLflow tracking server. `train.py` sets the tracking URI when it is imported. The default is `http://127.0.0.1:1040`, which is where the Compose `mlflow` service listens:
+
+```bash
+docker compose up -d mlflow
+python -m src.models.train                      # all rows in data/*.csv
+python -m src.models.train --sample-size 100000  # quick experiment (earliest N cleaned rows)
+```
+
+To use a different tracking server, set `MLFLOW_TRACKING_URI`. Training logs the run to MLflow. To serve the new model, point `MLFLOW_MODEL_URI` at its artifact directory (or replace `models/model_artifact/model`, which is what the Docker image copies).
+
+---
+
+## Configuration
+
+All settings live in `config/config.py` and are read from environment variables (`.env` is loaded with `python-dotenv`).
+
+| Variable | Default in code | Used by | Purpose |
+| --- | --- | --- | --- |
+| `MLFLOW_MODEL_URI` | `/app/model_artifact` | API | Path or URI of the MLflow model to serve |
+| `MLFLOW_TRACKING_URI` | `http://127.0.0.1:1040` | Training | MLflow tracking server |
+| `MLFLOW_EXPERIMENT_NAME` | `flight_arr_delay_champion_model1` | Training | MLflow experiment |
+| `API_URL` | `http://127.0.0.1:1041` | Streamlit | Base URL of the FastAPI service |
+| `API_HOST` / `API_PORT` | `0.0.0.0` / `8000` | Docker `CMD` | Uvicorn bind address (set as image `ENV`) |
+| `TRAINING_YEAR` | `2025` | Config only | Defined but not used by the training flow |
+
+`.env` is git-ignored and excluded from the Docker image. Do not commit secrets.
+
+---
+
+## API reference
+
+Entry point: `src.api.main:app` (title "Flight Arrival Delay Prediction API", version `1.0.0`). The model is loaded once during application startup; if it cannot be loaded or validated, the app fails to start.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/` | Service name, version and endpoint list |
+| `GET` | `/health` | `{"status": "healthy", "model_loaded": true, "model_type": "Pipeline"}` (or `unhealthy` when no model is loaded) |
+| `GET` | `/model` | Model URI, pipeline steps, model / preprocessor type, expected columns, `historical_features_used`. Returns 503 if no model is loaded |
+| `POST` | `/predict` | Predict arrival delay for one flight |
+| `GET` | `/metrics` | Prometheus metrics |
+| `GET` | `/docs` | Interactive Swagger UI |
+
+### `POST /predict`
+
+Request body (all fields required, unknown fields such as `ARR_DELAY` are rejected with 422):
 
 ```json
 {
@@ -319,168 +367,158 @@ The entry point is `src.api.main:app`. FastAPI loads the model once during appli
 }
 ```
 
-`FL_DATE` is parsed by Pydantic as a datetime. Times must be valid `HHMM` values and distance must be non-negative.
-
-Example request:
-
-```powershell
-$body = @'
-{
-  "FL_DATE": "2026-08-22",
-  "CRS_DEP_TIME": 800,
-  "CRS_ARR_TIME": 1100,
-  "CRS_ELAPSED_TIME": 180,
-  "DISTANCE": 2475,
-  "OP_UNIQUE_CARRIER": "AA",
-  "ORIGIN": "JFK",
-  "DEST": "LAX"
-}
-'@
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/predict -ContentType 'application/json' -Body $body
+```bash
+curl -X POST http://localhost:1041/predict \
+  -H "Content-Type: application/json" \
+  -d '{"FL_DATE":"2026-08-22","CRS_DEP_TIME":800,"CRS_ARR_TIME":1100,"CRS_ELAPSED_TIME":180,"DISTANCE":2475,"OP_UNIQUE_CARRIER":"AA","ORIGIN":"JFK","DEST":"LAX"}'
 ```
 
-Successful response:
+Response:
 
 ```json
 {
-  "prediction": 12.45,
+  "prediction": 21.24,
   "target": "ARR_DELAY",
   "model": "lightgbm",
   "source": "mlflow"
 }
 ```
 
-Typical status codes are 200 for success, 422 for schema validation, 400 for feature validation errors, 500 for inference or feature-contract failures, and 503 when the model is not loaded.
+The exact `prediction` value depends on the loaded model. Use port `8000` if you run the API locally (Option B).
 
-## Streamlit Application
+| Status | Cause |
+| --- | --- |
+| `200` | Success |
+| `400` | Feature validation failed (for example an invalid `HHMM` time or negative distance) |
+| `422` | Request schema violation (missing field, wrong type, unknown field) |
+| `500` | Model input missing columns or containing NaN, or an unexpected inference error |
+| `503` | Model not loaded |
 
-`app/app.py` collects carrier, origin, destination, date, scheduled departure and arrival times, distance, and scheduled duration. It sends those values to `POST /predict` and displays the predicted delay. The sidebar calls `/health`, and the model-information expander calls `/model`; both checks are cached for 15 seconds.
+---
 
-## Docker
+## Streamlit application
 
-The `Dockerfile` uses `python:3.11-slim`, installs `libgomp1` and `requirements.txt`, copies `config`, `src`, `app`, and the pinned model artifact to `/app/model_artifact`, and starts FastAPI by default. It exposes container ports 8000 and 8501.
+`app/app.py` is a **thin client**: it never loads the model or runs feature engineering. It:
 
-Build and run the API directly:
+- collects carrier, origin, destination, flight date, departure and arrival times, distance and scheduled duration;
+- validates basic inputs client-side (positive distance and duration, origin ≠ destination);
+- sends the request to `POST /predict` and shows the predicted delay in minutes;
+- shows API status in the sidebar (`/health`) and the model's numerical/categorical features in an expander (`/model`), both cached for 15 seconds;
+- maps API failures (connection errors, timeouts, 4xx/5xx) to readable messages.
 
-```powershell
+The carrier and airport dropdowns are fixed lists of common IATA codes. The API itself accepts any string and ignores unseen categories at the one-hot step.
+
+---
+
+## MLflow
+
+- `train.py` logs, for each run: the LightGBM hyperparameters, row counts (`train_rows`, `test_rows`), `num_features`, `train_*` / `test_*` metrics (RMSE, MAE, R²), a `feature_importance.csv` artifact, and the full sklearn pipeline (`mlflow.sklearn.log_model`, cloudpickle serialization).
+- Runs are stored in the local `mlruns/` file store under the experiment `flight_arr_delay_champion_model1`.
+- The Compose `mlflow` service serves that store (`./mlruns` mounted at `/mlruns`) on host port `1040`.
+- The API loads a model **directly from a local path** (`MLFLOW_MODEL_URI`) with `mlflow.sklearn.load_model()`. It does not use a model registry or stage/alias promotion.
+- The bundled model records MLflow 3.15.1 and scikit-learn 1.9.0 in `MLmodel`. It was serialized under Python 3.14.7, while the Docker image uses Python 3.11, and it loads in both.
+
+---
+
+## Docker and Docker Compose
+
+### Dockerfile
+
+- Base image `python:3.11-slim`, plus `libgomp1` (required by LightGBM).
+- Installs `requirements.txt`, then copies `config/`, `src/`, `app/` and `models/model_artifact/model` (as `/app/model_artifact`).
+- Sets `MLFLOW_MODEL_URI=/app/model_artifact`, `API_HOST=0.0.0.0`, `API_PORT=8000`. The default command starts Uvicorn. Streamlit reuses the same image with a different command.
+- `.dockerignore` keeps `.env`, `data/`, `mlruns/`, `tests/`, notebooks, CSVs and the virtualenv out of the image.
+
+```bash
 docker build -t flight-delay-prediction .
 docker run --rm -p 8000:8000 flight-delay-prediction
 ```
 
-Compose starts:
+### Compose services
 
-| Service     | Container port | Host port | Behavior                            |
-| ----------- | -------------: | --------: | ----------------------------------- |
-| `api`       |           8000 |      1041 | FastAPI; healthchecked at `/health` |
-| `streamlit` |           1040 |      1043 | Streamlit; waits for a healthy API  |
+| Service | Image | Host → container port | Notes |
+| --- | --- | --- | --- |
+| `api` | built from `Dockerfile` | `1041 → 8000` | Healthcheck calls `/health` every 10s (5s timeout, 5 retries, 15s start period) |
+| `streamlit` | same image | `1043 → 1040` | Runs headless; `API_URL=http://api:8000`; waits for a healthy `api` |
+| `mlflow` | `ghcr.io/mlflow/mlflow:latest` | `1040 → 5000` | File backend store at `./mlruns` |
+| `prometheus` | `prom/prometheus:latest` | `1044 → 9090` | Mounts `monitoring/prometheus/prometheus.yml`; waits for a healthy `api` |
+| `grafana` | `grafana/grafana:latest` | `1042 → 3000` | Provisioned datasource and dashboard; data in the `grafana_data` volume |
 
-```powershell
-docker compose up --build
-docker compose down
-```
+All services use `restart: unless-stopped`. The image name can be overridden with `IMAGE_NAME` (default `flight-delay-prediction:latest`).
 
-Compose mounts `./mlruns` read-only and points the API at `/app/mlruns/.../artifacts`; the direct image default points at `/app/model_artifact`. Keep the artifact path, Dockerfile model ID, and `.dockerignore` exceptions synchronized when changing the served model.
+---
 
-## MLflow
+## Monitoring: Prometheus and Grafana
 
-The local `.env` sets `MLFLOW_TRACKING_URI=sqlite:///mlflow.db`; the code default is `http://127.0.0.1:5000`. The configured experiment name is `flight_arr_delay_champion_model`.
+- **Instrumentation:** `prometheus-fastapi-instrumentator` adds request metrics to the API and exposes them at `/metrics`.
+- **Prometheus:** scrapes `api:8000/metrics` every 15 seconds (job `flight-delay-api`).
+- **Grafana:** the Prometheus datasource (`http://prometheus:9090`) and the **Flight Delay - MLOps Monitoring** dashboard (uid `flight-delay-mlops`, refresh 15s) are provisioned from files, so no manual setup is needed.
+- **Dashboard panels:** API status, requests/second, P95 latency, error rate (4xx/5xx), memory, CPU, requests over time, requests by endpoint, requests by status, and P95 latency over time.
 
-The checked-in model is under:
+Grafana runs with its image defaults (the Compose file does not set admin credentials). Change the default login before exposing it publicly.
 
-```text
-mlruns/4/models/m-6d479b8fd10a4744862b3b6ec29260d8/artifacts/
-├── MLmodel
-├── conda.yaml
-├── model.skops
-├── python_env.yaml
-└── requirements.txt
-```
+The monitoring covers **API health and traffic only**. There is no model-quality or data-drift monitoring.
 
-Its metadata identifies MLflow `3.15.1`, scikit-learn `1.9.0`, Python `3.11.9`, and skops serialization. `src.api.model_loader` uses `mlflow.sklearn.load_model()`, validates the `predict()` method and `preprocessor`/`model` pipeline steps, and records the fitted preprocessor's expected columns.
-
-No MLflow server startup script is included. The API does not require a running MLflow server when `MLFLOW_MODEL_URI` points to the local artifact.
+---
 
 ## Testing
 
-Run the suite with the project interpreter:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest
+```bash
+pytest
 ```
 
-Tests cover API health, prediction, validation, model metadata, rejection of `ARR_DELAY`, absence of historical feature names, feature engineering, preprocessing behavior, and the custom target encoder. No lint, formatter, type checker, or CI command is configured.
+`pytest.ini` sets `pythonpath = .` and `testpaths = tests`. The suite has **14 tests** (all passing):
 
-## Development Guide
+| File | Covers |
+| --- | --- |
+| `tests/test_api.py` | `/health`, `/predict` (valid input, missing field, rejection of `ARR_DELAY`), `/model`, and the absence of historical features. Uses a fake pipeline, so no real model is needed |
+| `tests/test_build_features.py` | `build_features()` works without history, produces every configured feature, and contains no historical columns |
+| `tests/test_target_encoding.py` | The preprocessor uses `OneHotEncoder(handle_unknown="ignore")`; the out-of-fold target encoder differs from a full-data fit |
 
-- Change loading or cleaning in `src/data/load.py` and `src/data/clean_data.py`.
-- Change the chronological split in `src/data/split_data.py`.
-- Add derived features in `src/features/build_feature.py` and synchronize feature lists in `config/config.py`.
-- Change imputation or category handling in `src/preprocessing/preprocess.py`.
-- Change model parameters, evaluation, or MLflow logging in `src/models/train.py`.
-- Change request/response contracts in `src/api/schemas.py` and endpoints in `src/api/main.py`.
-- Change the Streamlit client in `app/app.py`.
-- Add tests under `tests/`.
-- Change ports, healthchecks, or service dependencies in `docker-compose.yml`; change image contents in `Dockerfile`.
+### Load testing
 
-When changing the model, retrain and log a new artifact, update `MLFLOW_MODEL_URI`, and update the Dockerfile model ID plus matching `.dockerignore` exceptions. Test both local and Compose startup because their artifact paths differ.
+`tests/load/locustfile.py` defines a Locust user that sends mostly valid `/predict` requests (about 97%), some invalid ones, and occasional `/health` calls. Locust is not in `requirements.txt`:
 
-## Troubleshooting
-
-| Problem                                          | Likely cause                                     | Solution                                                                         |
-| ------------------------------------------------ | ------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `No module named pytest` or another dependency   | System Python is being used                      | Activate `.venv` or use `.\.venv\Scripts\python.exe -m ...`                      |
-| API fails during startup with a model-load error | Model URI is missing, incorrect, or incompatible | Confirm the artifact exists and install `requirements.txt`                       |
-| Streamlit says the API is unavailable            | FastAPI is stopped or `API_URL` is wrong         | Start FastAPI first and set `API_URL` to its reachable base URL                  |
-| Docker healthcheck fails                         | Model artifact path or service startup problem   | Run `docker compose logs api`; verify model ID and `.dockerignore` exceptions    |
-| Prediction returns 422                           | Missing/wrong/unknown JSON field                 | Match the `FlightRequest` example; do not send `ARR_DELAY`                       |
-| Prediction returns 400                           | Invalid date, time, distance, or duration        | Use a parseable date, valid `HHMM`, non-negative distance, and positive duration |
-| Training cannot load data                        | No CSV files under `data/`                       | Place monthly input files directly in `data/`                                    |
-| Port conflict                                    | Another process uses 8000, 8501, 1041, or 1043   | Stop it or choose another port and update `API_URL`                              |
-
-## Limitations and Security
-
-- Model quality depends on the available monthly data and is not guaranteed for future schedules or unseen operating conditions.
-- The API has no authentication, authorization, rate limiting, or TLS. Do not expose it to an untrusted network without adding those controls.
-- The Streamlit selector lists are static common carrier and airport codes; the API accepts arbitrary strings and ignores unknown one-hot categories.
-- Local MLflow state, `.env`, and data should be treated as development assets. Never commit credentials or private data.
-- No license file is present.
-
-## Repository State
-
-The documented checkout is on branch `main`. The current `HEAD` is:
-
-```text
-daf919c (HEAD -> main, origin/main) Update the mlflow
+```bash
+pip install locust
+locust -f tests/load/locustfile.py --host http://localhost:1041
 ```
 
-Recent commits cover MLflow and EDA updates, Docker deployment, API fixes, feature updates, and API/Dockerfile additions. This README describes the current checkout, not older revisions.
+---
 
-Basic Git commands:
+## CI/CD
 
-```powershell
-git status
-git add README.md
-git commit -m "Document project setup and architecture"
-git push
-```
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `ci.yml` | Push or PR to `main` / `develop` | Python 3.11, `pip install -r requirements.txt`, `python -m pytest -v` |
+| `cd.yml` | CI completes successfully on `main` | Logs in to GHCR, builds the image, pushes `ghcr.io/ahmed77923/flight-delay-prediction` tagged with the commit SHA and `latest` |
 
-No branching strategy is specified by the repository.
+There is no linting or coverage step, and the CD workflow does not deploy to a server. It stops at publishing the image.
 
+---
 
+## Deployment
 
-```
-## to start testing ueser 
-locust -f tests/load/locustfile.py --host=http://localhost:1041
+The project is set up for a single-VPS Docker Compose deployment:
 
+- `docker compose up -d --build` runs the whole stack on the host.
+- `nginx/flight-delay.duckdns.org.conf` is a site config for an **existing system-level Nginx** on the VPS. It is not run by Compose. It listens on port 80 for `flight-delay.duckdns.org` and proxies to Streamlit on `127.0.0.1:1043`, with the WebSocket upgrade headers and long timeouts that Streamlit needs. A commented-out `/api/` location can expose FastAPI under the same domain. The FastAPI service stays reachable directly on port `1041`.
+- The Nginx config only serves HTTP. There is no TLS configuration in this repository.
 
-## streamlit host
-http://127.0.0.1:1043/
+---
 
+## Known limitations
 
-API host
-http://127.0.0.1:1041/docs
+- **Modest accuracy:** see [Model results](#model-results). Test R² is between roughly 0 and 0.06 across the committed runs.
+- **Schedule-only features:** no weather, airport congestion, aircraft rotation or previous-flight delay information is used.
+- **Training data is not included** in the repository.
+- **Tracking URI is hard-coded in the model loader:** `src/api/model_loader.py` calls `mlflow.set_tracking_uri("http://127.0.0.1:1040")`. This is harmless when loading from a local path, but it ignores `MLFLOW_TRACKING_URI`.
+- **No authentication or TLS** on the API, Streamlit, MLflow or Prometheus, and Streamlit's XSRF protection is disabled in Compose. Do not expose the stack publicly without adding these controls.
+- **No model registry workflow, automated retraining, or drift monitoring.**
+- **Container-only paths:** the default `MLFLOW_MODEL_URI` and `API_URL` values in code suit the Docker/Compose setup, so local runs need the environment variables listed in [Getting started](#getting-started).
 
+---
 
-grafana host
-http://localhost:1044
-```
+## Documentation
+
+The `docs/` folder contains detailed per-topic documentation (architecture, data, feature engineering, modeling, training, MLflow, API, Streamlit, Docker, monitoring, testing, CI/CD, deployment, configuration, troubleshooting, security and a development guide). Start at [`docs/README.md`](docs/README.md). This README reflects the repository as inspected and is the reference for host port numbers if the docs differ.
