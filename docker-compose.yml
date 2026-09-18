@@ -60,7 +60,9 @@ services:
         "app/app.py",
         "--server.address=0.0.0.0",
         "--server.port=1040",
-        "--server.headless=true"
+        "--server.headless=true",
+        "--server.enableCORS=false",
+        "--server.enableXsrfProtection=false"
       ]
 
     ports:
