@@ -18,6 +18,10 @@ mlflow.db
 *.csv
 *.parquet
 
+# Batch Serving: uploaded inputs, generated predictions, job metadata
+# (already covered by /data/ and *.csv above; kept explicit on purpose)
+data/batch/
+
 # Generated files
 model_comparison_results_one_Hot.csv
 

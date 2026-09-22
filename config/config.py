@@ -113,6 +113,34 @@ class APIConfig:
          "http://127.0.0.1:1041",
     )
 
+class BatchConfig:
+    """Configuration for Batch Inference / Offline Serving."""
+
+    # Batch files live under data/batch/{input,output,metadata}. The root
+    # can be relocated (e.g. onto a Docker volume) with BATCH_DATA_DIR.
+    BATCH_DIR: Path = Path(
+        os.getenv(
+            "BATCH_DATA_DIR",
+            str(DataConfig.DATA_PATH / "batch"),
+        )
+    )
+    INPUT_DIR: Path = BATCH_DIR / "input"
+    OUTPUT_DIR: Path = BATCH_DIR / "output"
+    METADATA_DIR: Path = BATCH_DIR / "metadata"
+
+    PREDICTION_COLUMN: str = "predicted_arr_delay"
+
+    # Rows read, featurised and predicted per step. Bounds memory use on
+    # very large files while keeping model.predict() fully vectorised.
+    CHUNK_SIZE: int = int(os.getenv("BATCH_CHUNK_SIZE", "100000"))
+
+    MAX_UPLOAD_MB: int = int(os.getenv("BATCH_MAX_UPLOAD_MB", "200"))
+
+    # Batch jobs started through the API run in a background pool. One
+    # worker keeps memory bounded and leaves CPU for online /predict.
+    MAX_WORKERS: int = int(os.getenv("BATCH_MAX_WORKERS", "1"))
+
+
 class Config:
     """Main project configuration."""
 
@@ -121,3 +149,4 @@ class Config:
     PREPROCESSING: Type[PreprocessingConfig] = PreprocessingConfig
     MLFLOW: Type[MLflowConfig] = MLflowConfig
     API: Type[APIConfig] = APIConfig
+    BATCH: Type[BatchConfig] = BatchConfig

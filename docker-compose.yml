@@ -11,6 +11,12 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 8000
       MLFLOW_MODEL_URI: /app/model_artifact
+      BATCH_DATA_DIR: /app/data/batch
+
+    # Batch input / output / metadata. A named volume keeps batch results
+    # across container rebuilds and avoids host file-permission issues.
+    volumes:
+      - batch_data:/app/data/batch
 
     healthcheck:
       test:
@@ -124,4 +130,5 @@ services:
 
 volumes:
   grafana_data:
+  batch_data:
 

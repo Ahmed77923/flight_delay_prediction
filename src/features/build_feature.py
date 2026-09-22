@@ -24,9 +24,9 @@ CATEGORICAL_FEATURES = Config.PREPROCESSING.CATEGORICAL_FEATURES
 NUMERICAL_FEATURES = Config.PREPROCESSING.NUMERICAL_FEATURES
 MODEL_FEATURES = CATEGORICAL_FEATURES + NUMERICAL_FEATURES
 
-
-def validate_raw_columns(df: pd.DataFrame) -> None:
-    required = {
+# Raw columns every flight record must provide (mirrors FlightRequest).
+REQUIRED_RAW_COLUMNS = frozenset(
+    {
         "FL_DATE",
         "CRS_DEP_TIME",
         "CRS_ARR_TIME",
@@ -36,8 +36,11 @@ def validate_raw_columns(df: pd.DataFrame) -> None:
         "ORIGIN",
         "DEST",
     }
+)
 
-    missing = required - set(df.columns)
+
+def validate_raw_columns(df: pd.DataFrame) -> None:
+    missing = REQUIRED_RAW_COLUMNS - set(df.columns)
 
     if missing:
         raise ValueError(f"Missing columns: {sorted(missing)}")

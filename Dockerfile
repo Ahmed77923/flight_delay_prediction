@@ -19,7 +19,11 @@ COPY src ./src
 COPY app ./app
 COPY models/model_artifact/model ./model_artifact
 
+# Batch Serving working directories (mounted as a volume by Compose).
+RUN mkdir -p /app/data/batch/input /app/data/batch/output /app/data/batch/metadata
+
 ENV MLFLOW_MODEL_URI=/app/model_artifact \
+    BATCH_DATA_DIR=/app/data/batch \
     API_HOST=0.0.0.0 \
     API_PORT=8000
 

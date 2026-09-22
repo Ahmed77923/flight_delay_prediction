@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.config import Config
+from batch_page import render_batch_page
 
 
 # ============================================================
@@ -259,6 +260,11 @@ st.markdown(
 
 
 with st.sidebar:
+    page = st.radio(
+        "Navigation",
+        ["Single Prediction", "Batch Prediction"],
+    )
+
     st.subheader("Prediction API")
 
     health = check_api_health()
@@ -276,6 +282,11 @@ with st.sidebar:
         )
 
     st.caption(f"Endpoint: `{PREDICT_ENDPOINT}`")
+
+
+if page == "Batch Prediction":
+    render_batch_page()
+    st.stop()
 
 
 st.markdown(

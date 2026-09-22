@@ -18,7 +18,18 @@ from src.api.schemas import (
     PredictionResponse,
 )
 
-from src.features.build_feature import build_features
+from src.api.batch_routes import router as batch_router
+from src.batch.runner import (
+    recover_interrupted_jobs,
+    shutdown_executor,
+)
+from src.inference.predictor import (
+    PREDICTION_PRECISION,
+    MissingModelFeaturesError,
+    NullModelInputError,
+    predict_frame,
+    prepare_model_input,
+)
 
 
 # ============================================================
@@ -90,7 +101,18 @@ async def lifespan(app: FastAPI):
 
         raise
 
+    # Batch jobs left pending/running by a previous process can never
+    # finish; mark them failed so clients stop polling them.
+    try:
+        recover_interrupted_jobs()
+    except Exception:
+        logger.exception(
+            "Could not recover interrupted batch jobs."
+        )
+
     yield
+
+    shutdown_executor()
 
     logger.info(
         "Flight Delay Prediction API stopped."
@@ -111,6 +133,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 Instrumentator().instrument(app).expose(app)
+app.include_router(batch_router)
 
 # ============================================================
 # ROOT
@@ -127,6 +150,9 @@ def root():
             "/health",
             "/model",
             "/predict",
+            "/batch/predict",
+            "/batch/status/{batch_id}",
+            "/batch/results/{batch_id}",
         ],
     }
 
@@ -207,75 +233,43 @@ def predict(flight: FlightRequest,) -> PredictionResponse:
         )
 
         # ====================================================
-        # 2. FEATURE ENGINEERING
-        # ====================================================
-
-        features = build_features(df)
-
-        logger.info(
-            "Feature engineering completed. "
-            "Shape: %s",
-            features.shape,
-        )
-
-        logger.info(
-            "Generated features: %s",
-            list(features.columns),
-        )
-
-        # ====================================================
-        # 3. EXPECTED MODEL FEATURES
+        # 2-4. FEATURE ENGINEERING, EXPECTED COLUMNS, NaN CHECK
+        #      (shared with Batch Serving: src/inference/predictor.py)
         # ====================================================
 
         expected_columns = (
             get_expected_columns()
         )
 
-        missing = [
-            column
-            for column in expected_columns
-            if column not in features.columns
-        ]
+        try:
 
-        if missing:
+            X = prepare_model_input(
+                df,
+                expected_columns,
+            )
+
+        except MissingModelFeaturesError as exc:
 
             raise HTTPException(
                 status_code=500,
                 detail={
                     "error": "Missing model features",
-                    "missing_columns": missing,
+                    "missing_columns": exc.missing,
                 },
-            )
+            ) from exc
 
-        # ----------------------------------------------------
-        # Select exactly the features used during training
-        # ----------------------------------------------------
-
-        X = features[
-            expected_columns
-        ]
-
-        # ====================================================
-        # 4. CHECK NaN
-        # ====================================================
-
-        if X.isna().any().any():
-
-            null_columns = (
-                X.columns[
-                    X.isna().any()
-                ].tolist()
-            )
+        except NullModelInputError as exc:
 
             raise HTTPException(
                 status_code=500,
                 detail={
                     "error": "Model input contains NaN",
-                    "columns": null_columns,
+                    "columns": exc.columns,
                 },
-            )
+            ) from exc
 
         logger.info(
+            "Feature engineering completed. "
             "Prediction input shape: %s",
             X.shape,
         )
@@ -285,7 +279,7 @@ def predict(flight: FlightRequest,) -> PredictionResponse:
         # ====================================================
 
         prediction = float(
-            state.model.predict(X)[0]
+            predict_frame(state.model, X)[0]
         )
 
         logger.info(
@@ -300,7 +294,7 @@ def predict(flight: FlightRequest,) -> PredictionResponse:
         return PredictionResponse(
             prediction=round(
                 prediction,
-                2,
+                PREDICTION_PRECISION,
             ),
             target="ARR_DELAY",
             model="lightgbm",
