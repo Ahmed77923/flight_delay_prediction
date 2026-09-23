@@ -56,3 +56,10 @@ jobs:
             echo "SSH connection successful"
             whoami
             hostname
+
+            
+            cd ~/flight_delay_prediction
+
+            export IMAGE_NAME=ghcr.io/ahmed77923/flight-delay-prediction:latest
+
+            docker compose pull
