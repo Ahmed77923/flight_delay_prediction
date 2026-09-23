@@ -33,5 +33,3 @@ jobs:
       - name: Run tests
         run: |
           python -m pytest -v
-
-# Additionally, you can add more jobs or steps to the CI workflow as needed, such as linting, code coverage, or deployment steps.
