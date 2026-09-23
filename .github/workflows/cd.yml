@@ -45,8 +45,8 @@ jobs:
 
           docker push "$IMAGE_NAME:${{ github.event.workflow_run.head_sha }}"
           docker push "$IMAGE_NAME:latest"
-          
-      - name: Test SSH connection to VPS
+
+      - name: Test SSH connection to  VPS
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
