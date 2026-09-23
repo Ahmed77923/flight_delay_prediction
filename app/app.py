@@ -244,7 +244,7 @@ st.markdown(
     <style>
     .stApp { background: #000000; }
     .block-container { max-width: 1120px; padding-top: 2.5rem; }
-    .hero { background: #420a13; color: white; padding: 2.4rem 2.8rem;
+    .hero { background: #061bd4; color: white; padding: 2.4rem 2.8rem;
             border-radius: 10px; margin-bottom: 1.5rem; }
     .hero h1 { color: #f8fbfa; font-size: 2.5rem; margin: 0; }
     .hero p { color: #c8dcda; font-size: 1.05rem; margin: .6rem 0 0; }
